@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>监理进度管控台</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark">监</span>
+          <div>
+            <strong>进度管控台</strong>
+            <small>监理工程师专用</small>
+          </div>
+        </div>
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="dashboard">总览</button>
+          <button class="nav-item" data-view="scope">项目部位</button>
+          <button class="nav-item" data-view="schedule">计划节点</button>
+          <button class="nav-item" data-view="issues">滞后与整改</button>
+          <button class="nav-item" data-view="diary">监理日志</button>
+          <button class="nav-item" data-view="meetings">会议纪要</button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">工程进度控制</p>
+            <h1 id="pageTitle">总览</h1>
+          </div>
+          <div class="top-actions">
+            <select id="projectFilter" aria-label="选择项目"></select>
+            <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboardView" aria-labelledby="pageTitle">
+          <section class="command-screen" aria-label="中控大屏">
+            <div class="screen-header">
+              <div>
+                <span class="screen-kicker">MISSION CONTROL DISPLAY</span>
+                <h2 id="screenProjectName">项目中控大屏</h2>
+              </div>
+              <div class="screen-status">
+                <span class="pulse-dot"></span>
+                <strong id="missionStatus">进度监测中</strong>
+              </div>
+            </div>
+            <div class="screen-body">
+              <div class="orbit-display">
+                <div class="orbit-ring">
+                  <div class="orbit-core">
+                    <span>实际推进</span>
+                    <strong id="screenProgress">0%</strong>
+                  </div>
+                  <span class="satellite sat-a"></span>
+                  <span class="satellite sat-b"></span>
+                  <span class="satellite sat-c"></span>
+                </div>
+              </div>
+              <div class="screen-readouts">
+                <div class="readout">
+                  <span>关键节点</span>
+                  <strong id="screenCriticalTask">暂无节点</strong>
+                  <small id="screenCriticalMeta">等待计划录入</small>
+                </div>
+                <div class="readout">
+                  <span>监理指令</span>
+                  <strong id="screenCommand">保持巡检</strong>
+                  <small id="screenCommandMeta">根据滞后与临期事项自动生成</small>
+                </div>
+                <div class="readout">
+                  <span>覆盖范围</span>
+                  <strong id="screenScope">7 栋楼｜地下室 1 层</strong>
+                  <small id="screenScopeMeta">机电、消防、智能化、电梯施工内容已纳入</small>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="kpi-grid">
+            <article class="metric">
+              <span>总体完成率</span>
+              <strong id="overallProgress">0%</strong>
+              <small id="progressTrend">按节点权重折算</small>
+            </article>
+            <article class="metric">
+              <span>滞后节点</span>
+              <strong id="delayedCount">0</strong>
+              <small>需监理跟踪确认</small>
+            </article>
+            <article class="metric">
+              <span>本周到期</span>
+              <strong id="dueSoonCount">0</strong>
+              <small>7 天内计划完成</small>
+            </article>
+            <article class="metric">
+              <span>未闭合整改</span>
+              <strong id="openIssueCount">0</strong>
+              <small>含进度偏差问题</small>
+            </article>
+          </div>
+
+          <div class="ops-grid">
+            <section class="panel ops-panel">
+              <div class="panel-heading">
+                <h2>计划实际偏差</h2>
+                <span id="deviationSummary">自动对比</span>
+              </div>
+              <div class="ops-list" id="deviationList"></div>
+            </section>
+            <section class="panel ops-panel">
+              <div class="panel-heading">
+                <h2>关键路径预警</h2>
+                <span>穿插关系</span>
+              </div>
+              <div class="ops-list" id="dependencyList"></div>
+            </section>
+            <section class="panel ops-panel">
+              <div class="panel-heading">
+                <h2>责任单位排名</h2>
+                <span>例会点名</span>
+              </div>
+              <div class="ops-list" id="unitRanking"></div>
+            </section>
+          </div>
+
+          <section class="panel weekly-panel">
+            <div class="panel-heading">
+              <h2>监理周报自动生成</h2>
+              <span id="weeklySummary">按当前项目生成</span>
+            </div>
+            <div class="weekly-actions">
+              <button class="primary-btn" id="generateWeeklyBtn" type="button">生成周报</button>
+              <button class="ghost-btn" id="copyWeeklyBtn" type="button">复制内容</button>
+              <button class="ghost-btn" id="carouselBtn" type="button">中控轮播</button>
+            </div>
+            <textarea id="weeklyReportOutput" rows="8" readonly></textarea>
+          </section>
+
+          <div class="content-grid">
+            <section class="panel wide">
+              <div class="panel-heading">
+                <h2>进度曲线</h2>
+                <span id="chartHint">计划与实际对比</span>
+              </div>
+              <canvas id="progressChart" height="220" aria-label="进度曲线图"></canvas>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>预警清单</h2>
+                <span>自动识别</span>
+              </div>
+              <div class="warning-list" id="warningList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="scopeView">
+          <section class="panel scope-command">
+            <div class="panel-heading">
+              <h2>项目部位与施工内容</h2>
+              <span id="scopeSummary">0 栋楼｜0 个单位</span>
+            </div>
+            <div class="building-grid" id="buildingGrid"></div>
+          </section>
+
+          <section class="panel model-panel" aria-label="楼栋三维进度模型">
+            <div class="panel-heading">
+              <h2>3D 楼栋完成模型</h2>
+              <span id="modelSummary">拖拽旋转｜点击楼栋查看明细</span>
+            </div>
+            <div class="model-toolbar" aria-label="3D 模型筛选与视角控制">
+              <label>
+                楼栋
+                <select id="modelBuildingFilter"></select>
+              </label>
+              <label>
+                专业单位
+                <select id="modelUnitFilter"></select>
+              </label>
+              <label>
+                施工内容
+                <select id="modelSystemFilter"></select>
+              </label>
+              <label>
+                状态
+                <select id="modelStatusFilter">
+                  <option value="all">全部状态</option>
+                  <option value="delay">只看滞后</option>
+                  <option value="risk">只看临期</option>
+                  <option value="done">只看已完成</option>
+                  <option value="active">只看施工中</option>
+                </select>
+              </label>
+              <div class="model-view-actions" aria-label="模型视角">
+                <button class="ghost-btn" type="button" data-model-view="front">正视</button>
+                <button class="ghost-btn" type="button" data-model-view="top">俯视</button>
+                <button class="ghost-btn" type="button" data-model-view="left">左侧</button>
+                <button class="ghost-btn" type="button" data-model-view="right">右侧</button>
+                <button class="ghost-btn" type="button" data-model-view="reset">复位</button>
+              </div>
+              <button class="primary-btn" id="modelAutoRotateBtn" type="button">自动旋转</button>
+              <button class="ghost-btn" id="modelResetFilterBtn" type="button">清除筛选</button>
+            </div>
+            <div class="model-grid">
+              <div class="building-model-wrap">
+                <canvas id="buildingModel" class="building-model" aria-label="每栋楼施工完成情况三维模型"></canvas>
+                <div class="model-legend">
+                  <span><i class="legend-done"></i>完成</span>
+                  <span><i class="legend-progress"></i>施工中</span>
+                  <span><i class="legend-risk"></i>滞后/未完成</span>
+                </div>
+              </div>
+              <aside class="model-detail" id="modelDetail">
+                <span>楼栋详情</span>
+                <strong>请选择楼栋</strong>
+                <p>点击 3D 模型中的楼栋后，这里会显示该楼栋、楼层已完成或正在推进的施工内容。</p>
+              </aside>
+            </div>
+          </section>
+
+          <section class="unit-grid" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
+
+          <section class="panel mobile-inspection">
+            <div class="panel-heading">
+              <h2>移动端巡检模式</h2>
+              <span>现场勾选</span>
+            </div>
+            <div class="inspection-grid" id="inspectionGrid"></div>
+          </section>
+
+          <section class="panel basement-section">
+            <div class="panel-heading">
+              <h2>地下室剖面舱段</h2>
+              <span id="basementSummary">地下系统进度</span>
+            </div>
+            <div class="basement-cutaway" id="basementCutaway"></div>
+          </section>
+        </section>
+
+        <section class="view" id="scheduleView">
+          <div class="panel import-panel">
+            <div class="panel-heading">
+              <h2>导入进度 Excel</h2>
+              <span>批量更新全局数据</span>
+            </div>
+            <div class="import-grid">
+              <label class="file-drop">
+                <span>选择 .xlsx / .xls / .csv 文件</span>
+                <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
+              </label>
+              <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载模板</button>
+              <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。</p>
+            </div>
+            <div class="validation-report" id="importValidationReport"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>新增计划节点</h2>
+              <span>计划、实际、责任单位</span>
+            </div>
+            <form class="form-grid" id="taskForm">
+              <label>
+                节点名称
+                <input name="name" required placeholder="如：地下室结构封顶" />
+              </label>
+              <label>
+                专业/分部
+                <select name="discipline">
+                  <option>土建</option>
+                  <option>机电</option>
+                  <option>消防</option>
+                  <option>智能化</option>
+                  <option>电梯</option>
+                  <option>装饰</option>
+                  <option>市政</option>
+                  <option>安全文明</option>
+                </select>
+              </label>
+              <label>
+                施工部位
+                <select name="building" id="taskBuildingSelect"></select>
+              </label>
+              <label>
+                楼层
+                <input name="floor" placeholder="如：3层、地下1层" />
+              </label>
+              <label>
+                施工内容
+                <select name="system" id="taskSystemSelect"></select>
+              </label>
+              <label>
+                责任单位
+                <input name="owner" required placeholder="如：总包一标段" />
+              </label>
+              <label>
+                计划完成
+                <input name="planned" type="date" required />
+              </label>
+              <label>
+                实际完成
+                <input name="actual" type="date" />
+              </label>
+              <label>
+                完成率
+                <input name="progress" type="number" min="0" max="100" step="5" value="0" />
+              </label>
+              <label class="full">
+                监理意见
+                <textarea name="note" rows="2" placeholder="记录偏差原因、要求施工单位采取的纠偏措施"></textarea>
+              </label>
+              <button class="primary-btn" type="submit">添加节点</button>
+            </form>
+          </div>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <h2>节点台账</h2>
+              <span id="taskCount">0 项</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>节点</th>
+                    <th>部位/楼层/内容</th>
+                    <th>专业</th>
+                    <th>责任单位</th>
+                    <th>计划</th>
+                    <th>实际</th>
+                    <th>完成率</th>
+                    <th>状态</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="taskTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="view" id="issuesView">
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>新增滞后/整改项</h2>
+              <span>闭环跟踪</span>
+            </div>
+            <form class="form-grid" id="issueForm">
+              <label>
+                问题标题
+                <input name="title" required placeholder="如：机电管综深化滞后影响吊顶施工" />
+              </label>
+              <label>
+                责任单位
+                <input name="owner" required placeholder="如：机电分包" />
+              </label>
+              <label>
+                要求完成
+                <input name="deadline" type="date" required />
+              </label>
+              <label>
+                严重程度
+                <select name="severity">
+                  <option>一般</option>
+                  <option>重要</option>
+                  <option>紧急</option>
+                </select>
+              </label>
+              <label class="full">
+                监理要求
+                <textarea name="action" rows="2" required placeholder="明确赶工、资源投入、专项会议或书面回复要求"></textarea>
+              </label>
+              <button class="primary-btn" type="submit">添加整改项</button>
+            </form>
+          </div>
+          <div class="issue-board" id="issueBoard"></div>
+        </section>
+
+        <section class="view" id="diaryView">
+          <div class="split-panels">
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>今日监理日志</h2>
+                <span>现场进度证据</span>
+              </div>
+              <form id="diaryForm" class="stack-form">
+                <label>
+                  日期
+                  <input name="date" type="date" required />
+                </label>
+                <label>
+                  天气/施工条件
+                  <input name="weather" placeholder="晴，塔吊正常，劳动力 86 人" />
+                </label>
+                <label>
+                  现场进展
+                  <textarea name="content" rows="7" required placeholder="记录实际完成部位、投入资源、影响因素、监理指令"></textarea>
+                </label>
+                <button class="primary-btn" type="submit">保存日志</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <h2>日志记录</h2>
+                <span id="diaryCount">0 条</span>
+              </div>
+              <div class="timeline" id="diaryList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="meetingsView">
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>进度会议纪要</h2>
+              <span>形成可追踪事项</span>
+            </div>
+            <form class="form-grid" id="meetingForm">
+              <label>
+                会议日期
+                <input name="date" type="date" required />
+              </label>
+              <label>
+                会议类型
+                <select name="type">
+                  <option>周例会</option>
+                  <option>专题协调会</option>
+                  <option>监理例会</option>
+                  <option>约谈会</option>
+                </select>
+              </label>
+              <label class="full">
+                主要决议
+                <textarea name="summary" rows="3" required placeholder="记录节点承诺、资源调整、需业主协调事项"></textarea>
+              </label>
+              <button class="primary-btn" type="submit">保存纪要</button>
+            </form>
+          </div>
+          <div class="meeting-list" id="meetingList"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
