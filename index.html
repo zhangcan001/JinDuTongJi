@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>监理进度管控台</title>
     <link rel="stylesheet" href="./styles.css" />
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="./js/vendor/xlsx.full.min.js"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -22,8 +22,6 @@
           <button class="nav-item" data-view="scope">项目部位</button>
           <button class="nav-item" data-view="schedule">计划节点</button>
           <button class="nav-item" data-view="issues">滞后与整改</button>
-          <button class="nav-item" data-view="diary">监理日志</button>
-          <button class="nav-item" data-view="meetings">会议纪要</button>
         </nav>
       </aside>
 
@@ -170,6 +168,54 @@
             <div class="building-grid" id="buildingGrid"></div>
           </section>
 
+          <section class="panel scope-maintenance">
+            <div class="panel-heading">
+              <h2>项目范围维护</h2>
+              <span id="scopeManageSummary">楼栋、专业、施工内容</span>
+            </div>
+            <div class="scope-maintenance-grid">
+              <form class="stack-form compact-form" id="buildingScopeForm">
+                <input name="originalName" type="hidden" />
+                <label>
+                  楼栋名称
+                  <input name="name" required placeholder="如：A1、教学楼" />
+                </label>
+                <label>
+                  层数
+                  <input name="floors" type="number" min="1" max="60" value="1" required />
+                </label>
+                <label>
+                  地下室名称
+                  <input name="basement" placeholder="如：地下室一层" />
+                </label>
+                <div class="form-actions">
+                  <button class="primary-btn" type="submit" id="saveBuildingScopeBtn">保存楼栋</button>
+                  <button class="ghost-btn" type="button" id="cancelBuildingEditBtn">取消</button>
+                </div>
+              </form>
+              <form class="stack-form compact-form" id="unitScopeForm">
+                <input name="originalName" type="hidden" />
+                <label>
+                  专业单位
+                  <input name="name" required placeholder="如：机电单位" />
+                </label>
+                <label>
+                  单位代码
+                  <input name="code" placeholder="如：MEP" />
+                </label>
+                <label>
+                  施工内容
+                  <textarea name="systems" rows="4" placeholder="每行一个施工内容，如：桥架敷设"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button class="primary-btn" type="submit" id="saveUnitScopeBtn">保存专业</button>
+                  <button class="ghost-btn" type="button" id="cancelUnitEditBtn">取消</button>
+                </div>
+              </form>
+              <div class="scope-maintenance-list" id="scopeMaintenanceList"></div>
+            </div>
+          </section>
+
           <section class="panel model-panel" aria-label="楼栋三维进度模型">
             <div class="panel-heading">
               <h2>3D 楼栋完成模型</h2>
@@ -218,6 +264,7 @@
                 </div>
                 <div class="discipline-legend" id="disciplineLegend"></div>
                 <div class="model-tooltip" id="modelTooltip"></div>
+                <div class="model-floor-panel" id="modelFloorPanel"></div>
               </div>
               <aside class="model-detail" id="modelDetail">
                 <span>楼栋详情</span>
@@ -228,14 +275,6 @@
           </section>
 
           <section class="unit-grid" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
-
-          <section class="panel mobile-inspection">
-            <div class="panel-heading">
-              <h2>移动端巡检模式</h2>
-              <span>现场勾选</span>
-            </div>
-            <div class="inspection-grid" id="inspectionGrid"></div>
-          </section>
 
           <section class="panel basement-section">
             <div class="panel-heading">
@@ -261,11 +300,18 @@
               <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
               <button class="ghost-btn" id="exportDelayBtn" type="button">导出滞后清单</button>
               <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
+              <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
+              <label class="ghost-btn import-backup">
+                恢复备份
+                <input id="backupInput" type="file" accept=".json,application/json" />
+              </label>
               <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。</p>
             </div>
             <div class="validation-report" id="importValidationReport"></div>
             <div class="import-diff" id="importDiffPanel"></div>
+            <div class="import-preview" id="importPreviewPanel"></div>
             <div class="baseline-panel" id="baselinePanel"></div>
+            <div class="restore-panel" id="restorePointPanel"></div>
           </div>
 
           <div class="panel">
@@ -274,6 +320,7 @@
               <span>计划、实际、责任单位</span>
             </div>
             <form class="form-grid" id="taskForm">
+              <input name="id" type="hidden" />
               <label>
                 节点名称
                 <input name="name" required placeholder="如：地下室结构封顶" />
@@ -323,7 +370,10 @@
                 监理意见
                 <textarea name="note" rows="2" placeholder="记录偏差原因、要求施工单位采取的纠偏措施"></textarea>
               </label>
-              <button class="primary-btn" type="submit">添加节点</button>
+              <div class="form-actions full">
+                <button class="primary-btn" type="submit" id="taskSubmitBtn">添加节点</button>
+                <button class="ghost-btn" type="button" id="cancelTaskEditBtn">取消编辑</button>
+              </div>
             </form>
           </div>
 
@@ -331,6 +381,40 @@
             <div class="panel-heading">
               <h2>节点台账</h2>
               <span id="taskCount">0 项</span>
+            </div>
+            <div class="task-filter-bar">
+              <label>
+                关键词
+                <input id="taskSearchInput" placeholder="节点、单位、楼栋、意见" />
+              </label>
+              <label>
+                状态
+                <select id="taskStatusFilter">
+                  <option value="all">全部状态</option>
+                  <option value="delay">已滞后</option>
+                  <option value="risk">临期</option>
+                  <option value="normal">正常</option>
+                  <option value="done">已完成</option>
+                </select>
+              </label>
+              <label>
+                楼栋
+                <select id="taskBuildingFilter"></select>
+              </label>
+              <label>
+                责任单位
+                <select id="taskOwnerFilter"></select>
+              </label>
+              <label>
+                排序
+                <select id="taskSortSelect">
+                  <option value="plannedAsc">计划时间近到远</option>
+                  <option value="plannedDesc">计划时间远到近</option>
+                  <option value="progressAsc">完成率低到高</option>
+                  <option value="progressDesc">完成率高到低</option>
+                </select>
+              </label>
+              <button class="ghost-btn" id="taskFilterResetBtn" type="button">清除筛选</button>
             </div>
             <div class="table-wrap">
               <table>
@@ -360,6 +444,7 @@
               <span>闭环跟踪</span>
             </div>
             <form class="form-grid" id="issueForm">
+              <input name="id" type="hidden" />
               <label>
                 问题标题
                 <input name="title" required placeholder="如：机电管综深化滞后影响吊顶施工" />
@@ -380,95 +465,41 @@
                   <option>紧急</option>
                 </select>
               </label>
+              <label>
+                关联节点
+                <select name="taskId" id="issueTaskSelect"></select>
+              </label>
+              <label>
+                复验/闭合日期
+                <input name="closedAt" type="date" />
+              </label>
               <label class="full">
                 监理要求
                 <textarea name="action" rows="2" required placeholder="明确赶工、资源投入、专项会议或书面回复要求"></textarea>
               </label>
-              <button class="primary-btn" type="submit">添加整改项</button>
+              <label class="full">
+                复验意见
+                <textarea name="reviewNote" rows="2" placeholder="记录复验情况、是否同意闭合、仍需整改事项"></textarea>
+              </label>
+              <div class="form-actions full">
+                <button class="primary-btn" type="submit" id="issueSubmitBtn">添加整改项</button>
+                <button class="ghost-btn" type="button" id="cancelIssueEditBtn">取消编辑</button>
+              </div>
             </form>
           </div>
           <div class="issue-board" id="issueBoard"></div>
         </section>
 
-        <section class="view" id="diaryView">
-          <div class="split-panels">
-            <section class="panel">
-              <div class="panel-heading">
-                <h2>今日监理日志</h2>
-                <span>现场进度证据</span>
-              </div>
-              <form id="diaryForm" class="stack-form">
-                <label>
-                  日期
-                  <input name="date" type="date" required />
-                </label>
-                <div class="diary-scope-fields">
-                  <label>
-                    楼栋
-                    <select name="building" id="diaryBuildingSelect"></select>
-                  </label>
-                  <label>
-                    楼层
-                    <input name="floor" placeholder="如：7层、地下室" />
-                  </label>
-                  <label>
-                    施工内容
-                    <select name="system" id="diarySystemSelect"></select>
-                  </label>
-                </div>
-                <label>
-                  天气/施工条件
-                  <input name="weather" placeholder="晴，塔吊正常，劳动力 86 人" />
-                </label>
-                <label>
-                  现场进展
-                  <textarea name="content" rows="7" required placeholder="记录实际完成部位、投入资源、影响因素、监理指令"></textarea>
-                </label>
-                <button class="primary-btn" type="submit">保存日志</button>
-              </form>
-            </section>
-            <section class="panel">
-              <div class="panel-heading">
-                <h2>日志记录</h2>
-                <span id="diaryCount">0 条</span>
-              </div>
-              <div class="timeline" id="diaryList"></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="view" id="meetingsView">
-          <div class="panel">
-            <div class="panel-heading">
-              <h2>进度会议纪要</h2>
-              <span>形成可追踪事项</span>
-            </div>
-            <form class="form-grid" id="meetingForm">
-              <label>
-                会议日期
-                <input name="date" type="date" required />
-              </label>
-              <label>
-                会议类型
-                <select name="type">
-                  <option>周例会</option>
-                  <option>专题协调会</option>
-                  <option>监理例会</option>
-                  <option>约谈会</option>
-                </select>
-              </label>
-              <label class="full">
-                主要决议
-                <textarea name="summary" rows="3" required placeholder="记录节点承诺、资源调整、需业主协调事项"></textarea>
-              </label>
-              <button class="primary-btn" type="submit">保存纪要</button>
-            </form>
-          </div>
-          <div class="meeting-list" id="meetingList"></div>
-        </section>
       </main>
     </div>
+    <button class="carousel-exit-btn" id="carouselExitBtn" type="button">退出轮播</button>
 
-    <script src="./app.js"></script>
+    <script src="./js/data.js"></script>
+    <script src="./js/dom.js"></script>
+    <script src="./js/state-import.js"></script>
+    <script src="./js/dashboard.js"></script>
+    <script src="./js/scope-model.js"></script>
+    <script src="./js/records-chart.js"></script>
+    <script src="./js/main.js"></script>
   </body>
 </html>
