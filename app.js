@@ -316,9 +316,16 @@ const els = {
   importResult: document.querySelector("#importResult"),
   importValidationReport: document.querySelector("#importValidationReport"),
   downloadTemplateBtn: document.querySelector("#downloadTemplateBtn"),
+  saveBaselineBtn: document.querySelector("#saveBaselineBtn"),
+  exportDelayBtn: document.querySelector("#exportDelayBtn"),
+  exportTasksBtn: document.querySelector("#exportTasksBtn"),
+  importDiffPanel: document.querySelector("#importDiffPanel"),
+  baselinePanel: document.querySelector("#baselinePanel"),
   issueBoard: document.querySelector("#issueBoard"),
   diaryList: document.querySelector("#diaryList"),
   diaryCount: document.querySelector("#diaryCount"),
+  diaryBuildingSelect: document.querySelector("#diaryBuildingSelect"),
+  diarySystemSelect: document.querySelector("#diarySystemSelect"),
   meetingList: document.querySelector("#meetingList"),
   buildingGrid: document.querySelector("#buildingGrid"),
   buildingModel: document.querySelector("#buildingModel"),
@@ -330,6 +337,8 @@ const els = {
   modelStatusFilter: document.querySelector("#modelStatusFilter"),
   modelAutoRotateBtn: document.querySelector("#modelAutoRotateBtn"),
   modelResetFilterBtn: document.querySelector("#modelResetFilterBtn"),
+  modelTooltip: document.querySelector("#modelTooltip"),
+  disciplineLegend: document.querySelector("#disciplineLegend"),
   scopeUnitGrid: document.querySelector("#scopeUnitGrid"),
   scopeSummary: document.querySelector("#scopeSummary"),
   deviationSummary: document.querySelector("#deviationSummary"),
@@ -371,6 +380,9 @@ document.querySelectorAll(".nav-item").forEach((button) => {
 document.querySelector('select[name="discipline"]').addEventListener("change", renderTaskScopeFields);
 els.excelInput.addEventListener("change", importProgressExcel);
 els.downloadTemplateBtn.addEventListener("click", downloadExcelTemplate);
+els.saveBaselineBtn?.addEventListener("click", savePlanBaseline);
+els.exportDelayBtn?.addEventListener("click", () => exportCsv("滞后清单.csv", buildDelayExportRows()));
+els.exportTasksBtn?.addEventListener("click", () => exportCsv("节点台账.csv", buildTaskExportRows(currentProjectItems("tasks"))));
 [
   els.modelBuildingFilter,
   els.modelUnitFilter,
@@ -460,7 +472,8 @@ document.querySelector("#issueForm").addEventListener("submit", (event) => {
   state.issues.push({
     id: crypto.randomUUID(),
     projectId: state.selectedProjectId,
-    status: "未闭合",
+    status: "未整改",
+    category: classifyDelayReason(`${data.title || ""}${data.action || ""}`),
     ...data
   });
   event.target.reset();
@@ -506,6 +519,30 @@ function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function normalizeIssueStatus(status) {
+  if (status === "已闭合") return "已闭合";
+  if (status === "跟踪中") return "整改中";
+  if (status === "待复验") return "待复验";
+  if (status === "整改中") return "整改中";
+  return "未整改";
+}
+
+function nextIssueStatus(status) {
+  const flow = ["未整改", "整改中", "待复验", "已闭合"];
+  const index = flow.indexOf(normalizeIssueStatus(status));
+  return flow[(index + 1) % flow.length];
+}
+
+function classifyDelayReason(text) {
+  const value = String(text || "");
+  if (/材料|进场|报验/.test(value)) return "材料";
+  if (/人|劳动力|班组|资源/.test(value)) return "劳动力";
+  if (/图纸|深化|设计|碰撞/.test(value)) return "图纸";
+  if (/穿插|交叉|作业面|协调/.test(value)) return "穿插";
+  if (/验收|资料|隐蔽|影像/.test(value)) return "验收资料";
+  return "综合";
+}
+
 function currentProjectItems(key) {
   return state[key].filter((item) => item.projectId === state.selectedProjectId);
 }
@@ -519,12 +556,21 @@ function migrateState(nextState) {
     ...structuredClone(demoState.projectScopes),
     ...(nextState.projectScopes || {})
   };
+  nextState.importHistory = nextState.importHistory || [];
+  nextState.planBaselines = nextState.planBaselines || [];
   nextState.tasks = mergeFloorDemoTasks(nextState);
   nextState.tasks = (nextState.tasks || []).map((task) => ({
     plannedProgress: expectedProgress({ planned: task.planned, actual: task.actual }),
     evidence: "",
     ...task
   }));
+  nextState.issues = (nextState.issues || []).map((issue) => ({
+    category: classifyDelayReason(issue.action || issue.title || ""),
+    ...issue,
+    status: normalizeIssueStatus(issue.status)
+  }));
+  nextState.diaries = nextState.diaries || [];
+  nextState.meetings = nextState.meetings || [];
   return nextState;
 }
 
@@ -551,10 +597,12 @@ async function importProgressExcel(event) {
       selectedBuildingName = lastImportFocus.buildingName;
       selectedModelFloor = lastImportFocus.floorLabel;
     }
+    recordImportHistory(result, file.name);
     saveState();
     render();
     els.importResult.textContent = `已导入 ${rows.length} 行：成功 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行；新增 ${result.created} 个节点，更新 ${result.updated} 个节点。`;
     renderImportValidation(validation);
+    renderImportDiff(result);
   } catch (error) {
     els.importResult.textContent = `导入失败：${error.message || "请检查表头和文件格式"}`;
   } finally {
@@ -604,6 +652,43 @@ function renderImportValidation(validation) {
     <p>成功 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行，提示 ${validation.warnings.length} 条。</p>
     <ul>${issueHtml || "<li>未发现字段缺失或范围异常。</li>"}</ul>
   `;
+}
+
+function recordImportHistory(result, fileName) {
+  state.importHistory = state.importHistory || [];
+  const locations = [...new Set(result.changed.map((item) => `${item.buildingName}|${item.floorLabel}`))];
+  state.importHistory.unshift({
+    id: crypto.randomUUID(),
+    projectId: state.selectedProjectId,
+    fileName,
+    time: new Date().toISOString(),
+    created: result.created,
+    updated: result.updated,
+    scopeAdded: result.scopeAdded,
+    locations: locations.slice(0, 30)
+  });
+  state.importHistory = state.importHistory.slice(0, 12);
+}
+
+function renderImportDiff(result) {
+  if (!els.importDiffPanel) return;
+  const locations = [...new Set(result.changed.map((item) => `${item.buildingName}｜${item.floorLabel}`))].slice(0, 12);
+  els.importDiffPanel.innerHTML = `
+    <strong>本次导入变化</strong>
+    <p>新增 ${result.created} 项｜更新 ${result.updated} 项｜范围补充 ${result.scopeAdded} 项</p>
+    <div class="diff-tags">
+      ${locations.length ? locations.map((item) => `<button type="button" data-focus-location="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("") : "<span>暂无变化楼层</span>"}
+    </div>
+  `;
+  els.importDiffPanel.querySelectorAll("[data-focus-location]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const [buildingName, floorLabel] = button.dataset.focusLocation.split("｜");
+      selectedBuildingName = buildingName;
+      selectedModelFloor = floorLabel;
+      switchView("scope");
+      renderProjectScope();
+    });
+  });
 }
 
 function applyImportedRows(rows) {
@@ -792,6 +877,92 @@ function downloadExcelTemplate() {
   URL.revokeObjectURL(url);
 }
 
+function savePlanBaseline() {
+  const tasks = currentProjectItems("tasks");
+  const baseline = {
+    id: crypto.randomUUID(),
+    projectId: state.selectedProjectId,
+    name: `计划基线 ${localDateText(today)}`,
+    createdAt: new Date().toISOString(),
+    taskCount: tasks.length,
+    overall: tasks.length ? averageProgress(tasks) : 0,
+    delayed: tasks.filter((task) => getTaskStatus(task).className === "delay").length,
+    dueSoon: tasks.filter((task) => getTaskStatus(task).className === "risk").length,
+    items: tasks.map((task) => ({
+      key: taskKey(task),
+      planned: task.planned,
+      plannedProgress: expectedProgress(task),
+      progress: Number(task.progress || 0)
+    }))
+  };
+  state.planBaselines = [baseline, ...(state.planBaselines || [])].slice(0, 8);
+  saveState();
+  renderBaselinePanel();
+}
+
+function renderBaselinePanel() {
+  if (!els.baselinePanel) return;
+  const baselines = (state.planBaselines || []).filter((item) => item.projectId === state.selectedProjectId);
+  const latest = baselines[0];
+  const currentTasks = currentProjectItems("tasks");
+  const currentOverall = currentTasks.length ? averageProgress(currentTasks) : 0;
+  const content = latest
+    ? `
+      <article>
+        <strong>${escapeHtml(latest.name)}</strong>
+        <small>${latest.taskCount} 项｜基线 ${latest.overall}%｜当前 ${currentOverall}%｜偏差 ${currentOverall - latest.overall}%</small>
+      </article>
+      ${baselines.slice(1, 4).map((item) => `<article><strong>${escapeHtml(item.name)}</strong><small>${item.taskCount} 项｜${item.overall}%｜${new Date(item.createdAt).toLocaleString()}</small></article>`).join("")}
+    `
+    : `<article><strong>暂无计划基线</strong><small>导入或调整计划后，可保存一次基线用于后续对比。</small></article>`;
+  els.baselinePanel.innerHTML = `<strong>计划基线管理</strong><div>${content}</div>`;
+}
+
+function buildTaskExportRows(tasks) {
+  return tasks.map((task) => ({
+    项目: currentProjectName(),
+    施工部位: task.building || "",
+    楼层: task.floor || "",
+    专业: task.discipline || "",
+    责任单位: task.owner || "",
+    施工内容: task.system || "",
+    节点名称: task.name || "",
+    计划完成: task.planned || "",
+    实际完成: task.actual || "",
+    计划完成率: expectedProgress(task),
+    完成率: task.progress || 0,
+    状态: getTaskStatus(task).label,
+    滞后原因: classifyDelayReason(`${task.note || ""}${task.name || ""}`),
+    监理意见: task.note || "",
+    资料: task.evidence || task.photo || ""
+  }));
+}
+
+function buildDelayExportRows() {
+  return buildTaskExportRows(currentProjectItems("tasks").filter((task) => getTaskStatus(task).className === "delay"));
+}
+
+function exportCsv(fileName, rows) {
+  const data = rows.length ? rows : [{ 提示: "当前筛选条件下暂无数据" }];
+  const headers = Object.keys(data[0]);
+  const csv = [
+    headers.join(","),
+    ...data.map((row) => headers.map((header) => csvCell(row[header])).join(","))
+  ].join("\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value) {
+  const text = String(value ?? "").replace(/"/g, '""');
+  return `"${text}"`;
+}
+
 function daysBetween(dateText) {
   const target = new Date(`${dateText}T00:00:00`);
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -852,6 +1023,18 @@ function renderTaskScopeFields() {
     : `<option>未设置施工内容</option>`;
 }
 
+function renderDiaryScopeFields() {
+  if (!els.diaryBuildingSelect || !els.diarySystemSelect) return;
+  const scope = currentProjectScope();
+  const buildings = [
+    ...scope.buildings.map((building) => `${building.name}（${building.floors}层）`),
+    scope.basement
+  ].filter(Boolean);
+  els.diaryBuildingSelect.innerHTML = buildings.map((label) => `<option>${escapeHtml(label)}</option>`).join("");
+  const systems = [...new Set(scope.units.flatMap((unit) => unit.systems))];
+  els.diarySystemSelect.innerHTML = systems.map((system) => `<option>${escapeHtml(system)}</option>`).join("");
+}
+
 function renderDashboard() {
   const tasks = currentProjectItems("tasks");
   const issues = currentProjectItems("issues");
@@ -861,7 +1044,7 @@ function renderDashboard() {
     : 0;
   const delayed = statuses.filter((status) => status.className === "delay").length;
   const dueSoon = statuses.filter((status) => status.className === "risk").length;
-  const openIssues = issues.filter((issue) => issue.status !== "已闭合").length;
+  const openIssues = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合").length;
 
   els.overallProgress.textContent = `${overall}%`;
   els.progressTrend.textContent = overall >= 85 ? "整体接近计划" : "需关注关键线路";
@@ -879,7 +1062,7 @@ function renderDashboard() {
         danger: getTaskStatus(task).className === "delay"
       })),
     ...issues
-      .filter((issue) => issue.status !== "已闭合")
+      .filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合")
       .map((issue) => ({
         title: issue.title,
         meta: `${issue.owner}，要求 ${issue.deadline} 前闭合`,
@@ -1021,7 +1204,7 @@ function renderCommandScreen(tasks, issues, stats) {
         || a.planned.localeCompare(b.planned);
     });
   const criticalTask = sortedRiskTasks[0];
-  const urgentIssue = issues.find((issue) => issue.status !== "已闭合" && issue.severity === "紧急");
+  const urgentIssue = issues.find((issue) => normalizeIssueStatus(issue.status) !== "已闭合" && issue.severity === "紧急");
 
   els.screenProjectName.textContent = project ? `${project.name}｜中控大屏` : "项目中控大屏";
   els.screenProgress.textContent = `${stats.overall}%`;
@@ -1064,7 +1247,7 @@ function generateWeeklyReport() {
   const done = tasks.filter((task) => getTaskStatus(task).className === "done");
   const delayed = tasks.filter((task) => getTaskStatus(task).className === "delay");
   const dueSoon = tasks.filter((task) => getTaskStatus(task).className === "risk");
-  const openIssues = issues.filter((issue) => issue.status !== "已闭合");
+  const openIssues = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合");
   const overall = tasks.length ? averageProgress(tasks) : 0;
   const dependencyRisks = buildDependencyRisks(tasks);
 
@@ -1293,6 +1476,7 @@ function renderBuildingModel(scope, tasks) {
   ].filter(Boolean).length;
 
   els.modelSummary.textContent = `${buildingStats.length} 个部位｜${filteredTasks.length} 个节点｜${activeFilterCount ? `${activeFilterCount} 项筛选` : "全量视图"}`;
+  renderDisciplineLegend(filteredTasks);
   renderModelDetail(selected, buildingStats);
   renderCanvasBuildingModel(buildingStats);
   return;
@@ -1356,6 +1540,24 @@ function renderCanvasBuildingModel(buildingStats) {
   drawCanvasBuildingModel();
 }
 
+function renderDisciplineLegend(tasks) {
+  if (!els.disciplineLegend) return;
+  const disciplines = [...new Set(tasks.map((task) => task.discipline || task.owner || "其他"))].slice(0, 6);
+  els.disciplineLegend.innerHTML = disciplines.map((discipline) => `
+    <span><i style="background:${disciplineColor(discipline)}"></i>${escapeHtml(discipline)}</span>
+  `).join("");
+}
+
+function disciplineColor(discipline) {
+  const text = String(discipline || "");
+  if (text.includes("机电")) return "#44d7ff";
+  if (text.includes("消防")) return "#ff5c6c";
+  if (text.includes("智能")) return "#a78bfa";
+  if (text.includes("电梯")) return "#ffb84a";
+  if (text.includes("土建")) return "#7dffcb";
+  return "#8ff5ff";
+}
+
 function renderModelFilters(scope) {
   if (!els.modelBuildingFilter) return;
   const buildings = [
@@ -1409,6 +1611,7 @@ function initCanvasBuildingModel() {
     dragging: false,
     moved: false,
     lastX: 0,
+    hoverItem: null,
     hitItems: [],
     stats: []
   };
@@ -1423,11 +1626,20 @@ function initCanvasBuildingModel() {
   });
 
   canvas.addEventListener("pointermove", (event) => {
-    if (!modelState.dragging) return;
+    if (!modelState.dragging) {
+      updateModelHover(event);
+      return;
+    }
     const delta = event.clientX - modelState.lastX;
     if (Math.abs(delta) > 2) modelState.moved = true;
     modelState.angle += delta * 0.01;
     modelState.lastX = event.clientX;
+    drawCanvasBuildingModel();
+  });
+
+  canvas.addEventListener("pointerleave", () => {
+    modelState.hoverItem = null;
+    if (els.modelTooltip) els.modelTooltip.classList.remove("show");
     drawCanvasBuildingModel();
   });
 
@@ -1449,6 +1661,30 @@ function initCanvasBuildingModel() {
     if (els.modelBuildingFilter) els.modelBuildingFilter.value = hit.name;
     render();
   });
+}
+
+function updateModelHover(event) {
+  if (!modelState?.isCanvasModel) return;
+  const rect = els.buildingModel.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const hit = modelState.hitItems.find((item) => pointInPolygon(x, y, item.polygon));
+  modelState.hoverItem = hit || null;
+  if (els.modelTooltip) {
+    if (hit) {
+      els.modelTooltip.innerHTML = `
+        <strong>${escapeHtml(hit.name)}｜${escapeHtml(hit.floorLabel)}</strong>
+        <span>完成率 ${hit.progress}%｜${statusLabel(hit.status)}</span>
+        <small>未完成 ${hit.openCount || 0} 项｜滞后 ${hit.delayCount || 0} 项</small>
+      `;
+      els.modelTooltip.style.left = `${Math.min(rect.width - 190, Math.max(12, x + 14))}px`;
+      els.modelTooltip.style.top = `${Math.min(rect.height - 92, Math.max(12, y + 14))}px`;
+      els.modelTooltip.classList.add("show");
+    } else {
+      els.modelTooltip.classList.remove("show");
+    }
+  }
+  drawCanvasBuildingModel();
 }
 
 function runCanvasModelLoop() {
@@ -1526,10 +1762,19 @@ function drawCanvasBuildingModel() {
         const floorTasks = item.related.filter((task) => taskMatchesFloor(task, floorLabel, item));
         const floorStatus = aggregateFloorStatus(floorTasks, progress);
         const isSelected = item.name === selectedBuildingName && (!selectedModelFloor || selectedModelFloor === floorLabel);
+        const isHovered = modelState.hoverItem?.name === item.name && modelState.hoverItem?.floorLabel === floorLabel;
         const isImportFocus = lastImportFocus?.buildingName === item.name && lastImportFocus.floorLabel === floorLabel;
-        drawIsoBox(ctx, box, cssColorForProgress(progress), isSelected || isImportFocus, floorStatus);
+        drawIsoBox(ctx, box, cssColorForProgress(progress), isSelected || isImportFocus || isHovered, floorStatus);
         drawFloorHeatmap(ctx, box, floorTasks, progress);
-        const hitItem = { name: item.name, floorLabel, progress, polygon: hitPolygonForBox(box), status: floorStatus };
+        const hitItem = {
+          name: item.name,
+          floorLabel,
+          progress,
+          polygon: hitPolygonForBox(box),
+          status: floorStatus,
+          openCount: floorTasks.filter((task) => getTaskStatus(task).className !== "done").length,
+          delayCount: floorTasks.filter((task) => getTaskStatus(task).className === "delay").length
+        };
         modelState.hitItems.unshift(hitItem);
         if (isSelected) selectedBadge = { ...hitItem, x: item.center.x, y: y - floorHeight - blockDepth - 18 };
       }
@@ -1672,7 +1917,9 @@ function drawFloorHeatmap(ctx, box, floorTasks, fallbackProgress) {
   ctx.save();
   segments.slice(0, 5).forEach((segment, index) => {
     const x = left.x + index * segmentWidth + 2;
-    ctx.fillStyle = statusColor(segment.status, segment.progress);
+    ctx.fillStyle = segment.status === "delay" || segment.status === "risk"
+      ? statusColor(segment.status, segment.progress)
+      : disciplineColor(segment.unit);
     ctx.fillRect(x, baseY, Math.max(5, segmentWidth - 4), 4);
   });
   ctx.restore();
@@ -2063,6 +2310,7 @@ function renderScopedModelDetail(target) {
     ? `${scopedTasks.length} 个进度节点关联到本层。`
     : `${target.related.length} 个进度节点已关联到该楼栋。`;
   const acceptance = buildAcceptancePanel(scopedTasks, target, selectedModelFloor);
+  const diaryHtml = buildLinkedDiaryPanel(target, selectedModelFloor);
   const tableRows = scopedTasks.length
     ? scopedTasks
         .slice()
@@ -2076,7 +2324,10 @@ function renderScopedModelDetail(target) {
               <td><span class="status ${status.className}">${status.label}</span><br><small>${Number(task.progress || 0)}%</small></td>
               <td>${escapeHtml(task.planned || "-")}</td>
               <td>${escapeHtml(task.actual || "-")}</td>
-              <td>${escapeHtml(task.note || "-")}</td>
+              <td>
+                ${escapeHtml(task.note || "-")}
+                ${(task.evidence || task.photo) ? `<br><small>资料：${escapeHtml(task.evidence || task.photo)}</small>` : ""}
+              </td>
             </tr>
           `;
         })
@@ -2088,6 +2339,7 @@ function renderScopedModelDetail(target) {
     <strong>${progress}% 综合完成</strong>
     <p>${escapeHtml(meta)}</p>
     ${acceptance}
+    ${diaryHtml}
     <div class="model-detail-table">
       <table>
         <thead>
@@ -2146,6 +2398,36 @@ function buildAcceptancePanel(tasks, target, floorLabel) {
       </article>
     </div>
   `;
+}
+
+function buildLinkedDiaryPanel(target, floorLabel) {
+  const diaries = linkedDiaries(target, floorLabel).slice(0, 3);
+  if (!diaries.length) {
+    return `
+      <div class="linked-diary-panel">
+        <strong>关联监理日志</strong>
+        <small>暂无匹配日志，新增日志时选择楼栋、楼层和施工内容后会自动关联。</small>
+      </div>
+    `;
+  }
+  return `
+    <div class="linked-diary-panel">
+      <strong>关联监理日志</strong>
+      ${diaries.map((diary) => `
+        <article>
+          <span>${escapeHtml(diary.date || "-")}｜${escapeHtml(diary.weather || "")}</span>
+          <small>${escapeHtml(diary.content || "")}</small>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function linkedDiaries(target, floorLabel) {
+  return currentProjectItems("diaries").filter((diary) => {
+    const text = `${diary.building || ""}${diary.floor || ""}${diary.system || ""}${diary.content || ""}`;
+    return text.includes(target.name) || (floorLabel && text.includes(floorLabel));
+  });
 }
 
 function taskMatchesBuilding(task, building) {
@@ -2291,13 +2573,14 @@ function renderIssues() {
     ? issues
         .map(
           (issue) => `
-            <article class="issue-card">
+            <article class="issue-card ${statusClassForIssue(issue.status)}">
               <span class="severity ${issue.severity === "紧急" ? "urgent" : issue.severity === "重要" ? "important" : "normal"}">${issue.severity}</span>
               <strong>${escapeHtml(issue.title)}</strong>
-              <small>${escapeHtml(issue.owner)}｜${issue.deadline}｜${issue.status}</small>
+              <small>${escapeHtml(issue.owner)}｜${issue.deadline}｜${normalizeIssueStatus(issue.status)}｜${escapeHtml(issue.category || classifyDelayReason(issue.action || issue.title))}</small>
               <p>${escapeHtml(issue.action)}</p>
+              <div class="issue-flow">${issueFlowHtml(issue.status)}</div>
               <div class="issue-actions">
-                <button data-advance-issue="${issue.id}" type="button">${issue.status === "已闭合" ? "重新打开" : "推进状态"}</button>
+                <button data-advance-issue="${issue.id}" type="button">${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"}</button>
                 <button data-delete-issue="${issue.id}" type="button">删除</button>
               </div>
             </article>
@@ -2309,7 +2592,7 @@ function renderIssues() {
   document.querySelectorAll("[data-advance-issue]").forEach((button) => {
     button.addEventListener("click", () => {
       const issue = state.issues.find((item) => item.id === button.dataset.advanceIssue);
-      issue.status = issue.status === "未闭合" ? "跟踪中" : issue.status === "跟踪中" ? "已闭合" : "未闭合";
+      issue.status = nextIssueStatus(issue.status);
       saveState();
       render();
     });
@@ -2322,6 +2605,22 @@ function renderIssues() {
       render();
     });
   });
+}
+
+function issueFlowHtml(status) {
+  const current = normalizeIssueStatus(status);
+  return ["未整改", "整改中", "待复验", "已闭合"].map((item) => `
+    <span class="${item === current ? "active" : ""}">${item}</span>
+  `).join("");
+}
+
+function statusClassForIssue(status) {
+  return {
+    未整改: "issue-open",
+    整改中: "issue-working",
+    待复验: "issue-review",
+    已闭合: "issue-closed"
+  }[normalizeIssueStatus(status)] || "issue-open";
 }
 
 function renderDiaries() {
@@ -2469,6 +2768,8 @@ function render() {
   renderDiaries();
   renderMeetings();
   renderProjectScope();
+  renderDiaryScopeFields();
+  renderBaselinePanel();
 }
 
 window.addEventListener("resize", () => {

@@ -47,6 +47,18 @@ npx serve .
 http://127.0.0.1:4173/
 ```
 
+## 在线部署
+
+仓库已包含 GitHub Pages 工作流：`.github/workflows/pages.yml`。
+
+推送到 `master` 后，GitHub Actions 会尝试部署静态页面。部署成功后，访问地址通常为：
+
+```text
+https://zhangcan001.github.io/JinDuTongJi/
+```
+
+如果首次使用 GitHub Pages，需要在仓库 Settings → Pages 中选择 GitHub Actions 作为部署来源。
+
 ## Excel 导入字段
 
 建议进度表包含以下列：

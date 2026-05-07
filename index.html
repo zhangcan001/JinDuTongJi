@@ -216,6 +216,8 @@
                   <span><i class="legend-progress"></i>施工中</span>
                   <span><i class="legend-risk"></i>滞后/未完成</span>
                 </div>
+                <div class="discipline-legend" id="disciplineLegend"></div>
+                <div class="model-tooltip" id="modelTooltip"></div>
               </div>
               <aside class="model-detail" id="modelDetail">
                 <span>楼栋详情</span>
@@ -256,9 +258,14 @@
                 <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
               </label>
               <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载模板</button>
+              <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
+              <button class="ghost-btn" id="exportDelayBtn" type="button">导出滞后清单</button>
+              <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
               <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。</p>
             </div>
             <div class="validation-report" id="importValidationReport"></div>
+            <div class="import-diff" id="importDiffPanel"></div>
+            <div class="baseline-panel" id="baselinePanel"></div>
           </div>
 
           <div class="panel">
@@ -395,6 +402,20 @@
                   日期
                   <input name="date" type="date" required />
                 </label>
+                <div class="diary-scope-fields">
+                  <label>
+                    楼栋
+                    <select name="building" id="diaryBuildingSelect"></select>
+                  </label>
+                  <label>
+                    楼层
+                    <input name="floor" placeholder="如：7层、地下室" />
+                  </label>
+                  <label>
+                    施工内容
+                    <select name="system" id="diarySystemSelect"></select>
+                  </label>
+                </div>
                 <label>
                   天气/施工条件
                   <input name="weather" placeholder="晴，塔吊正常，劳动力 86 人" />
