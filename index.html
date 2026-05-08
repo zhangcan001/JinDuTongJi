@@ -32,7 +32,24 @@
             <h1 id="pageTitle">总览</h1>
           </div>
           <div class="top-actions">
-            <select id="projectFilter" aria-label="选择项目"></select>
+            <label class="top-field">
+              角色
+              <select id="roleSelect" aria-label="选择当前角色">
+                <option value="admin">管理员</option>
+                <option value="pm">项目经理</option>
+                <option value="contractor">施工单位</option>
+                <option value="supervisor">监理</option>
+                <option value="viewer">只读查看</option>
+              </select>
+            </label>
+            <label class="top-field global-search-field">
+              搜索
+              <input id="globalSearchInput" placeholder="楼栋、节点、单位、问题" />
+            </label>
+            <label class="top-field">
+              项目
+              <select id="projectFilter" aria-label="选择项目"></select>
+            </label>
             <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
           </div>
         </header>
@@ -157,6 +174,14 @@
               <div class="warning-list" id="warningList"></div>
             </section>
           </div>
+
+          <section class="panel analytics-panel">
+            <div class="panel-heading">
+              <h2>多维统计分析</h2>
+              <span id="analyticsSummary">按楼栋、单位、专业、月份统计</span>
+            </div>
+            <div class="analytics-grid" id="analyticsGrid"></div>
+          </section>
         </section>
 
         <section class="view" id="scopeView">
@@ -210,6 +235,15 @@
                 <div class="form-actions">
                   <button class="primary-btn" type="submit" id="saveUnitScopeBtn">保存专业</button>
                   <button class="ghost-btn" type="button" id="cancelUnitEditBtn">取消</button>
+                </div>
+              </form>
+              <form class="stack-form compact-form" id="buildingBatchForm">
+                <label>
+                  批量楼栋
+                  <textarea name="buildings" rows="7" placeholder="每行一个，如：A3,18&#10;A4 12层&#10;地下室二层"></textarea>
+                </label>
+                <div class="form-actions">
+                  <button class="primary-btn" type="submit">批量增加</button>
                 </div>
               </form>
               <div class="scope-maintenance-list" id="scopeMaintenanceList"></div>
@@ -296,11 +330,21 @@
                 <span>选择 .xlsx / .xls / .csv 文件</span>
                 <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
               </label>
-              <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载模板</button>
+              <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载多表模板</button>
               <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
               <button class="ghost-btn" id="exportDelayBtn" type="button">导出滞后清单</button>
               <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
+              <button class="ghost-btn" id="exportIssuesBtn" type="button">导出整改台账</button>
+              <button class="ghost-btn" id="exportReportBtn" type="button">导出周报</button>
               <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
+              <label class="import-mode-field">
+                导入策略
+                <select id="importModeSelect">
+                  <option value="upsert">更新已有并追加新增</option>
+                  <option value="updateOnly">只更新已有</option>
+                  <option value="appendOnly">只追加新增</option>
+                </select>
+              </label>
               <label class="ghost-btn import-backup">
                 恢复备份
                 <input id="backupInput" type="file" accept=".json,application/json" />
@@ -312,6 +356,8 @@
             <div class="import-preview" id="importPreviewPanel"></div>
             <div class="baseline-panel" id="baselinePanel"></div>
             <div class="restore-panel" id="restorePointPanel"></div>
+            <div class="data-health-panel" id="dataHealthPanel"></div>
+            <div class="audit-panel" id="auditLogPanel"></div>
           </div>
 
           <div class="panel">
@@ -434,6 +480,7 @@
                 <tbody id="taskTable"></tbody>
               </table>
             </div>
+            <div class="table-pagination" id="taskPagination"></div>
           </section>
         </section>
 

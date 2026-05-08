@@ -140,6 +140,7 @@ function renderScopeMaintenance(scope) {
 
 function saveScopeBuilding(event) {
   event.preventDefault();
+  if (!ensureCanEdit("保存楼栋")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   const scope = currentProjectScope();
@@ -156,13 +157,43 @@ function saveScopeBuilding(event) {
     existing.name = name;
     existing.floors = floors;
     renameTaskBuilding(previousLabel, `${name}（${floors}层）`, originalName || name, name);
+    recordAudit("编辑楼栋", `${originalName || name} -> ${name}（${floors}层）`);
   } else {
     scope.buildings.push({ name, floors });
+    recordAudit("新增楼栋", `${name}（${floors}层）`);
   }
   scope.basement = String(data.basement || "").trim();
   selectedBuildingName = name;
   selectedModelFloor = "";
   resetBuildingScopeForm();
+  saveState();
+  render();
+}
+
+function saveBuildingBatch(event) {
+  event.preventDefault();
+  if (!ensureCanEdit("批量增加楼栋")) return;
+  const form = event.currentTarget;
+  const rows = String(new FormData(form).get("buildings") || "")
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter(Boolean);
+  if (!rows.length) return;
+  const scope = currentProjectScope();
+  let added = 0;
+  rows.forEach((row) => {
+    if (row.includes("地下")) {
+      scope.basement = row;
+      return;
+    }
+    const building = parseBuilding(row.replace(",", " "));
+    if (!scope.buildings.some((item) => item.name === building.name)) {
+      scope.buildings.push(building);
+      added += 1;
+    }
+  });
+  recordAudit("批量增加楼栋", `新增 ${added} 栋，地下室：${scope.basement || "未设置"}`);
+  form.reset();
   saveState();
   render();
 }
@@ -174,6 +205,7 @@ function editScopeBuilding(name) {
 }
 
 function editScopeBuildingByIndex(index) {
+  if (!ensureCanEdit("编辑楼栋")) return;
   const scope = currentProjectScope();
   const building = scope.buildings[index];
   fillBuildingScopeForm(building, scope);
@@ -192,6 +224,7 @@ function fillBuildingScopeForm(building, scope) {
 
 function deleteScopeBuilding(name) {
   if (!window.confirm(`确定删除楼栋“${name}”吗？已有节点不会删除，但将不再显示到项目范围。`)) return;
+  if (!ensureCanEdit("删除楼栋")) return;
   createRestorePoint("删除楼栋范围");
   const scope = currentProjectScope();
   scope.buildings = scope.buildings.filter((building) => building.name !== name);
@@ -200,6 +233,7 @@ function deleteScopeBuilding(name) {
     selectedModelFloor = "";
   }
   resetBuildingScopeForm();
+  recordAudit("删除楼栋", name);
   saveState();
   render();
 }
@@ -227,6 +261,7 @@ function addScopeBuilding() {
 
 function saveScopeUnit(event) {
   event.preventDefault();
+  if (!ensureCanEdit("保存专业")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
   const scope = currentProjectScope();
@@ -247,8 +282,10 @@ function saveScopeUnit(event) {
     existing.name = name;
     existing.code = code;
     existing.systems = uniqueSorted(systems);
+    recordAudit("编辑专业", name);
   } else {
     scope.units.push({ name, code, systems: uniqueSorted(systems) });
+    recordAudit("新增专业", name);
   }
   resetUnitScopeForm();
   saveState();
@@ -256,6 +293,7 @@ function saveScopeUnit(event) {
 }
 
 function editScopeUnit(name) {
+  if (!ensureCanEdit("编辑专业")) return;
   const unit = currentProjectScope().units.find((item) => item.name === name);
   if (!unit || !els.unitScopeForm) return;
   els.unitScopeForm.elements.originalName.value = unit.name;
@@ -267,10 +305,12 @@ function editScopeUnit(name) {
 
 function deleteScopeUnit(name) {
   if (!window.confirm(`确定删除专业“${name}”吗？已有进度节点不会删除。`)) return;
+  if (!ensureCanEdit("删除专业")) return;
   createRestorePoint("删除专业范围");
   const scope = currentProjectScope();
   scope.units = scope.units.filter((unit) => unit.name !== name);
   resetUnitScopeForm();
+  recordAudit("删除专业", name);
   saveState();
   render();
 }
@@ -460,6 +500,7 @@ function floorLabelsForBuilding(building) {
 }
 
 function addTaskFromModelFloor(building) {
+  if (!ensureCanEdit("新增本层节点")) return;
   if (!els.taskForm) return;
   switchView("schedule");
   resetTaskForm();
@@ -519,7 +560,15 @@ function renderCssBuildingModel(buildingStats) {
 function renderCanvasBuildingModel(buildingStats) {
   if (!modelState || !modelState.isCanvasModel) initCanvasBuildingModel();
   modelState.stats = buildingStats;
-  drawCanvasBuildingModel();
+  scheduleCanvasModelDraw();
+}
+
+function scheduleCanvasModelDraw() {
+  if (drawModelFrame) return;
+  drawModelFrame = requestAnimationFrame(() => {
+    drawModelFrame = null;
+    drawCanvasBuildingModel();
+  });
 }
 
 function renderDisciplineLegend(tasks) {
@@ -616,13 +665,13 @@ function initCanvasBuildingModel() {
     if (Math.abs(delta) > 2) modelState.moved = true;
     modelState.angle += delta * 0.01;
     modelState.lastX = event.clientX;
-    drawCanvasBuildingModel();
+    scheduleCanvasModelDraw();
   });
 
   canvas.addEventListener("pointerleave", () => {
     modelState.hoverItem = null;
     if (els.modelTooltip) els.modelTooltip.classList.remove("show");
-    drawCanvasBuildingModel();
+    scheduleCanvasModelDraw();
   });
 
   canvas.addEventListener("pointerup", (event) => {
@@ -666,7 +715,7 @@ function updateModelHover(event) {
       els.modelTooltip.classList.remove("show");
     }
   }
-  drawCanvasBuildingModel();
+  scheduleCanvasModelDraw();
 }
 
 function runCanvasModelLoop() {
@@ -676,7 +725,7 @@ function runCanvasModelLoop() {
     if (!modelState?.isCanvasModel) return;
     if (modelState.autoRotate && !modelState.dragging) {
       modelState.angle += 0.004;
-      drawCanvasBuildingModel();
+      scheduleCanvasModelDraw();
       requestAnimationFrame(tick);
       return;
     }
@@ -703,7 +752,7 @@ function setModelView(view) {
   };
   Object.assign(modelState, views[view] || views.reset, { autoRotate: false });
   updateAutoRotateButton();
-  drawCanvasBuildingModel();
+  scheduleCanvasModelDraw();
 }
 
 function drawCanvasBuildingModel() {

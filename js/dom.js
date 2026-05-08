@@ -1,5 +1,7 @@
 ﻿const els = {
   pageTitle: document.querySelector("#pageTitle"),
+  roleSelect: document.querySelector("#roleSelect"),
+  globalSearchInput: document.querySelector("#globalSearchInput"),
   projectFilter: document.querySelector("#projectFilter"),
   overallProgress: document.querySelector("#overallProgress"),
   progressTrend: document.querySelector("#progressTrend"),
@@ -18,18 +20,24 @@
   saveBaselineBtn: document.querySelector("#saveBaselineBtn"),
   exportDelayBtn: document.querySelector("#exportDelayBtn"),
   exportTasksBtn: document.querySelector("#exportTasksBtn"),
+  exportIssuesBtn: document.querySelector("#exportIssuesBtn"),
+  exportReportBtn: document.querySelector("#exportReportBtn"),
   exportBackupBtn: document.querySelector("#exportBackupBtn"),
+  importModeSelect: document.querySelector("#importModeSelect"),
   backupInput: document.querySelector("#backupInput"),
   importDiffPanel: document.querySelector("#importDiffPanel"),
   importPreviewPanel: document.querySelector("#importPreviewPanel"),
   baselinePanel: document.querySelector("#baselinePanel"),
   restorePointPanel: document.querySelector("#restorePointPanel"),
+  dataHealthPanel: document.querySelector("#dataHealthPanel"),
+  auditLogPanel: document.querySelector("#auditLogPanel"),
   taskSearchInput: document.querySelector("#taskSearchInput"),
   taskStatusFilter: document.querySelector("#taskStatusFilter"),
   taskBuildingFilter: document.querySelector("#taskBuildingFilter"),
   taskOwnerFilter: document.querySelector("#taskOwnerFilter"),
   taskSortSelect: document.querySelector("#taskSortSelect"),
   taskFilterResetBtn: document.querySelector("#taskFilterResetBtn"),
+  taskPagination: document.querySelector("#taskPagination"),
   issueBoard: document.querySelector("#issueBoard"),
   issueTaskSelect: document.querySelector("#issueTaskSelect"),
   issueForm: document.querySelector("#issueForm"),
@@ -53,6 +61,7 @@
   scopeManageSummary: document.querySelector("#scopeManageSummary"),
   buildingScopeForm: document.querySelector("#buildingScopeForm"),
   unitScopeForm: document.querySelector("#unitScopeForm"),
+  buildingBatchForm: document.querySelector("#buildingBatchForm"),
   saveBuildingScopeBtn: document.querySelector("#saveBuildingScopeBtn"),
   cancelBuildingEditBtn: document.querySelector("#cancelBuildingEditBtn"),
   saveUnitScopeBtn: document.querySelector("#saveUnitScopeBtn"),
@@ -71,6 +80,8 @@
   carouselExitBtn: document.querySelector("#carouselExitBtn"),
   weeklyReportOutput: document.querySelector("#weeklyReportOutput"),
   weeklySummary: document.querySelector("#weeklySummary"),
+  analyticsGrid: document.querySelector("#analyticsGrid"),
+  analyticsSummary: document.querySelector("#analyticsSummary"),
   basementSummary: document.querySelector("#basementSummary"),
   basementCutaway: document.querySelector("#basementCutaway"),
   chart: document.querySelector("#progressChart")
@@ -81,10 +92,15 @@ let selectedBuildingName = "";
 let selectedModelFloor = "";
 let lastImportFocus = null;
 let pendingImport = null;
+let globalSearchQuery = "";
 const taskFilters = {
   query: "",
   status: "all",
   building: "all",
   owner: "all",
-  sort: "plannedAsc"
+  sort: "plannedAsc",
+  page: 1,
+  pageSize: 120
 };
+let stateCache = { version: 0, projectItems: new Map() };
+let drawModelFrame = null;

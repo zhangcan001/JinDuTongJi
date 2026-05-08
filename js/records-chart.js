@@ -2,9 +2,13 @@
   const tasks = currentProjectItems("tasks");
   syncTaskFilterControls(tasks);
   const filteredTasks = filterTasks(tasks);
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / taskFilters.pageSize));
+  taskFilters.page = Math.min(Math.max(1, taskFilters.page), totalPages);
+  const pageStart = (taskFilters.page - 1) * taskFilters.pageSize;
+  const pageTasks = filteredTasks.slice(pageStart, pageStart + taskFilters.pageSize);
   els.taskCount.textContent = filteredTasks.length === tasks.length ? `${tasks.length} 项` : `${filteredTasks.length} / ${tasks.length} 项`;
-  els.taskTable.innerHTML = filteredTasks.length
-    ? filteredTasks
+  els.taskTable.innerHTML = pageTasks.length
+    ? pageTasks
         .map((task) => {
           const status = getTaskStatus(task);
           return `
@@ -29,22 +33,48 @@
         .join("")
     : `<tr><td colspan="9">当前筛选条件下暂无节点。</td></tr>`;
 
-  document.querySelectorAll("[data-edit-task]").forEach((button) => {
+  renderTaskPagination(filteredTasks.length, totalPages);
+
+  els.taskTable.querySelectorAll("[data-edit-task]").forEach((button) => {
     button.addEventListener("click", () => editTask(button.dataset.editTask));
   });
 
-  document.querySelectorAll("[data-delete-task]").forEach((button) => {
+  els.taskTable.querySelectorAll("[data-delete-task]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!window.confirm("确定删除这个进度节点吗？")) return;
+      if (!ensureCanEdit("删除进度节点")) return;
       createRestorePoint("删除进度节点");
+      const removed = state.tasks.find((task) => task.id === button.dataset.deleteTask);
       state.tasks = state.tasks.filter((task) => task.id !== button.dataset.deleteTask);
+      recordAudit("删除进度节点", removed?.name || "");
       saveState();
       render();
     });
   });
 }
 
+function renderTaskPagination(total, totalPages) {
+  if (!els.taskPagination) return;
+  const start = total ? (taskFilters.page - 1) * taskFilters.pageSize + 1 : 0;
+  const end = Math.min(total, taskFilters.page * taskFilters.pageSize);
+  els.taskPagination.innerHTML = `
+    <span>${start}-${end} / ${total} 项</span>
+    <div>
+      <button type="button" data-task-page="prev" ${taskFilters.page <= 1 ? "disabled" : ""}>上一页</button>
+      <strong>${taskFilters.page} / ${totalPages}</strong>
+      <button type="button" data-task-page="next" ${taskFilters.page >= totalPages ? "disabled" : ""}>下一页</button>
+    </div>
+  `;
+  els.taskPagination.querySelectorAll("[data-task-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      taskFilters.page += button.dataset.taskPage === "next" ? 1 : -1;
+      renderTasks();
+    });
+  });
+}
+
 function editTask(taskId) {
+  if (!ensureCanEdit("编辑进度节点")) return;
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task || !els.taskForm) return;
   switchView("schedule");
@@ -83,8 +113,14 @@ function resetTaskForm() {
 
 function saveTaskFromForm(event) {
   event.preventDefault();
+  if (!ensureCanEdit("保存进度节点")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  const validation = validateTaskPayload(data);
+  if (validation.length) {
+    window.alert(validation.join("\n"));
+    return;
+  }
   const payload = {
     projectId: state.selectedProjectId,
     name: data.name,
@@ -101,12 +137,29 @@ function saveTaskFromForm(event) {
   const existing = data.id ? state.tasks.find((task) => task.id === data.id) : null;
   if (existing) {
     Object.assign(existing, payload);
+    recordAudit("编辑进度节点", payload.name);
   } else {
     state.tasks.push({ id: createId(), ...payload });
+    recordAudit("新增进度节点", payload.name);
   }
   resetTaskForm();
   saveState();
   render();
+}
+
+function validateTaskPayload(data) {
+  const problems = [];
+  if (!String(data.name || "").trim()) problems.push("节点名称不能为空。");
+  if (!String(data.owner || "").trim()) problems.push("责任单位不能为空。");
+  if (!data.planned) problems.push("计划完成日期不能为空。");
+  const progress = Number(data.progress || 0);
+  if (Number.isNaN(progress) || progress < 0 || progress > 100) problems.push("完成率必须在 0 到 100 之间。");
+  if (progress >= 100 && !data.actual) problems.push("完成率为 100% 时建议填写实际完成日期。");
+  const duplicate = state.tasks.find((task) => task.projectId === state.selectedProjectId
+    && task.id !== data.id
+    && taskKey(task) === taskKey({ projectId: state.selectedProjectId, building: data.building, floor: data.floor, system: data.system, name: data.name }));
+  if (duplicate) problems.push("相同楼栋、楼层、施工内容和节点名称已存在。");
+  return problems;
 }
 
 function updateTaskFiltersFromControls() {
@@ -115,6 +168,7 @@ function updateTaskFiltersFromControls() {
   taskFilters.building = els.taskBuildingFilter?.value || "all";
   taskFilters.owner = els.taskOwnerFilter?.value || "all";
   taskFilters.sort = els.taskSortSelect?.value || "plannedAsc";
+  taskFilters.page = 1;
   renderTasks();
 }
 
@@ -183,12 +237,15 @@ function compareTasksByFilter(a, b) {
   return String(a.planned || "").localeCompare(String(b.planned || ""));
 }
 function renderIssues() {
-  const issues = currentProjectItems("issues");
+  const issues = filterIssues(currentProjectItems("issues"));
   renderIssueTaskOptions();
-  els.issueBoard.innerHTML = issues.length
-    ? issues
-        .map(
-          (issue) => {
+  const columns = ["未整改", "整改中", "待复验", "已闭合"];
+  els.issueBoard.innerHTML = columns.map((statusName) => {
+    const statusIssues = issues.filter((issue) => normalizeIssueStatus(issue.status) === statusName);
+    return `
+      <section class="issue-column ${statusClassForIssue(statusName)}">
+        <h3>${statusName}<span>${statusIssues.length}</span></h3>
+        ${statusIssues.length ? statusIssues.map((issue) => {
             const linkedTask = issue.taskId ? state.tasks.find((task) => task.id === issue.taskId) : null;
             return `
             <article class="issue-card ${statusClassForIssue(issue.status)}">
@@ -209,16 +266,18 @@ function renderIssues() {
               </div>
             </article>
           `;
-          }
-        )
-        .join("")
-    : `<article class="issue-card"><strong>暂无整改项</strong><small>新增滞后问题后会显示在这里</small></article>`;
+          }).join("") : `<article class="issue-card empty"><strong>暂无事项</strong><small>${globalSearchQuery ? "当前搜索条件下无匹配整改项" : "该阶段暂无整改项"}</small></article>`}
+      </section>
+    `;
+  }).join("");
 
   document.querySelectorAll("[data-advance-issue]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (!ensureCanEdit("推进整改状态")) return;
       const issue = state.issues.find((item) => item.id === button.dataset.advanceIssue);
       issue.status = nextIssueStatus(issue.status);
       if (normalizeIssueStatus(issue.status) === "已闭合" && !issue.closedAt) issue.closedAt = localDateText(today);
+      recordAudit("推进整改状态", `${issue.title} -> ${issue.status}`);
       saveState();
       render();
     });
@@ -231,12 +290,30 @@ function renderIssues() {
   document.querySelectorAll("[data-delete-issue]").forEach((button) => {
     button.addEventListener("click", () => {
       if (!window.confirm("确定删除这个整改项吗？")) return;
+      if (!ensureCanEdit("删除整改项")) return;
       createRestorePoint("删除整改项");
+      const removed = state.issues.find((issue) => issue.id === button.dataset.deleteIssue);
       state.issues = state.issues.filter((issue) => issue.id !== button.dataset.deleteIssue);
+      recordAudit("删除整改项", removed?.title || "");
       saveState();
       render();
     });
   });
+}
+
+function filterIssues(issues) {
+  const query = String(globalSearchQuery || "").toLowerCase();
+  if (!query) return issues;
+  return issues.filter((issue) => [
+    issue.title,
+    issue.owner,
+    issue.deadline,
+    issue.severity,
+    issue.status,
+    issue.action,
+    issue.reviewNote,
+    issue.category
+  ].join(" ").toLowerCase().includes(query));
 }
 
 function renderIssueTaskOptions() {
@@ -252,8 +329,14 @@ function renderIssueTaskOptions() {
 
 function saveIssueFromForm(event) {
   event.preventDefault();
+  if (!ensureCanEdit("保存整改项")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  const validation = validateIssuePayload(data);
+  if (validation.length) {
+    window.alert(validation.join("\n"));
+    return;
+  }
   const payload = {
     projectId: state.selectedProjectId,
     title: data.title,
@@ -270,15 +353,27 @@ function saveIssueFromForm(event) {
   if (existing) {
     Object.assign(existing, payload);
     if (payload.closedAt) existing.status = "已闭合";
+    recordAudit("编辑整改项", payload.title);
   } else {
     state.issues.push({ id: createId(), status: payload.closedAt ? "已闭合" : "未整改", ...payload });
+    recordAudit("新增整改项", payload.title);
   }
   resetIssueForm();
   saveState();
   render();
 }
 
+function validateIssuePayload(data) {
+  const problems = [];
+  if (!String(data.title || "").trim()) problems.push("问题标题不能为空。");
+  if (!String(data.owner || "").trim()) problems.push("责任单位不能为空。");
+  if (!data.deadline) problems.push("要求完成日期不能为空。");
+  if (!String(data.action || "").trim()) problems.push("监理要求不能为空。");
+  return problems;
+}
+
 function editIssue(issueId) {
+  if (!ensureCanEdit("编辑整改项")) return;
   const issue = state.issues.find((item) => item.id === issueId);
   if (!issue || !els.issueForm) return;
   switchView("issues");

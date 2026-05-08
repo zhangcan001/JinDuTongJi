@@ -33,7 +33,20 @@ function bindEvents() {
   });
 
   document.querySelector('select[name="discipline"]').addEventListener("change", renderTaskScopeFields);
+  els.roleSelect?.addEventListener("change", (event) => {
+    state.currentRole = event.target.value;
+    recordAudit("切换当前角色", roleLabel(event.target.value));
+    saveState();
+    render();
+  });
+  els.globalSearchInput?.addEventListener("input", (event) => {
+    globalSearchQuery = event.target.value.trim();
+    taskFilters.query = globalSearchQuery;
+    taskFilters.page = 1;
+    render();
+  });
   els.buildingScopeForm?.addEventListener("submit", saveScopeBuilding);
+  els.buildingBatchForm?.addEventListener("submit", saveBuildingBatch);
   els.cancelBuildingEditBtn?.addEventListener("click", resetBuildingScopeForm);
   els.unitScopeForm?.addEventListener("submit", saveScopeUnit);
   els.cancelUnitEditBtn?.addEventListener("click", resetUnitScopeForm);
@@ -42,6 +55,8 @@ function bindEvents() {
   els.saveBaselineBtn?.addEventListener("click", savePlanBaseline);
   els.exportDelayBtn?.addEventListener("click", () => exportCsv("滞后清单.csv", buildDelayExportRows()));
   els.exportTasksBtn?.addEventListener("click", () => exportCsv("节点台账.csv", buildTaskExportRows(currentProjectItems("tasks"))));
+  els.exportIssuesBtn?.addEventListener("click", () => exportCsv("整改台账.csv", buildIssueExportRows()));
+  els.exportReportBtn?.addEventListener("click", exportWeeklyReportFile);
   els.exportBackupBtn?.addEventListener("click", exportDataBackup);
   els.backupInput?.addEventListener("change", importDataBackup);
 
@@ -57,7 +72,7 @@ function bindEvents() {
   });
 
   els.taskFilterResetBtn?.addEventListener("click", () => {
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc" });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
     renderTasks();
   });
 
@@ -127,19 +142,21 @@ function bindEvents() {
     selectedModelFloor = "";
     lastImportFocus = null;
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc" });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
     saveState();
     render();
     renderImportPreview(null);
   });
 
   document.querySelector("#resetDemoBtn").addEventListener("click", () => {
+    if (!ensureCanEdit("恢复示例数据")) return;
     createRestorePoint("恢复示例");
     const keepRestorePoints = state.restorePoints || [];
     state = migrateState(cloneData(demoState));
     state.restorePoints = keepRestorePoints;
+    recordAudit("恢复示例数据", "重置为内置示例");
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc" });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
     saveState();
     render();
     renderImportPreview(null);
@@ -153,6 +170,9 @@ function bindEvents() {
 }
 
 function render() {
+  if (els.roleSelect) els.roleSelect.value = currentRole();
+  if (els.globalSearchInput && els.globalSearchInput.value !== globalSearchQuery) els.globalSearchInput.value = globalSearchQuery;
+  applyRoleAccess();
   renderProjectFilter();
   renderDashboard();
   renderTasks();
@@ -160,11 +180,17 @@ function render() {
   renderProjectScope();
   renderBaselinePanel();
   renderRestorePointPanel();
+  renderDataHealthPanel();
+  renderAuditLogPanel();
+}
+
+function applyRoleAccess() {
+  document.body.dataset.role = currentRole();
 }
 
 window.addEventListener("resize", () => {
   drawChart(currentProjectItems("tasks"));
-  if (modelState?.isCanvasModel) drawCanvasBuildingModel();
+  if (modelState?.isCanvasModel) scheduleCanvasModelDraw();
 });
 
 bindEvents();

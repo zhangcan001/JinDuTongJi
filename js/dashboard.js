@@ -15,7 +15,7 @@
   if (view === "scope") {
     requestAnimationFrame(() => {
       renderProjectScope();
-      if (modelState?.isCanvasModel) drawCanvasBuildingModel();
+      if (modelState?.isCanvasModel) scheduleCanvasModelDraw();
     });
   }
 
@@ -103,6 +103,7 @@ function renderDashboard() {
 
   drawChart(tasks);
   renderOperationsDashboard(tasks);
+  renderAnalyticsPanel(tasks, issues);
 }
 
 function renderOperationsDashboard(tasks) {
@@ -293,6 +294,51 @@ function generateWeeklyReport() {
     "",
     "六、下周重点：优先复核滞后节点赶工资源、临期节点完成情况和整改闭合状态。"
   ].join("\n");
+}
+
+function renderAnalyticsPanel(tasks, issues) {
+  if (!els.analyticsGrid) return;
+  const dimensions = [
+    { title: "楼栋进度", rows: summarizeTasks(tasks, (task) => resolveBuildingName(task.building || task.name) || "未填楼栋") },
+    { title: "责任单位", rows: summarizeTasks(tasks, (task) => task.owner || "未填单位") },
+    { title: "专业分部", rows: summarizeTasks(tasks, (task) => task.discipline || "未填专业") },
+    { title: "月份趋势", rows: summarizeTasks(tasks, (task) => String(task.planned || "未排期").slice(0, 7)) }
+  ];
+  const openIssueCount = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合").length;
+  if (els.analyticsSummary) {
+    els.analyticsSummary.textContent = `${tasks.length} 个节点｜${openIssueCount} 个未闭合整改`;
+  }
+  els.analyticsGrid.innerHTML = dimensions.map((dimension) => `
+    <article class="analytics-card">
+      <h3>${escapeHtml(dimension.title)}</h3>
+      ${dimension.rows.length ? dimension.rows.slice(0, 6).map((row) => `
+        <div class="analytics-row">
+          <span>${escapeHtml(row.label)}</span>
+          <strong>${row.progress}%</strong>
+          <i><b style="width:${row.progress}%"></b></i>
+          <small>${row.count} 项｜滞后 ${row.delayed}｜临期 ${row.risk}</small>
+        </div>
+      `).join("") : `<div class="analytics-row empty"><span>暂无数据</span><small>录入节点后生成统计。</small></div>`}
+    </article>
+  `).join("");
+}
+
+function summarizeTasks(tasks, keyFn) {
+  const grouped = new Map();
+  tasks.forEach((task) => {
+    const key = keyFn(task);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(task);
+  });
+  return Array.from(grouped.entries())
+    .map(([label, items]) => ({
+      label,
+      count: items.length,
+      progress: averageProgress(items),
+      delayed: items.filter((task) => getTaskStatus(task).className === "delay").length,
+      risk: items.filter((task) => getTaskStatus(task).className === "risk").length
+    }))
+    .sort((a, b) => b.delayed - a.delayed || a.progress - b.progress || b.count - a.count);
 }
 
 let carouselTimer = null;
