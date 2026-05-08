@@ -65,7 +65,57 @@
 
   renderScopeMaintenance(scope);
   renderBuildingModel(scope, tasks);
+  renderElevatorDashboard(tasks);
+  renderDictionaryPanel(scope);
   renderBasementCutaway(scope, tasks);
+}
+
+function renderElevatorDashboard(tasks) {
+  if (!els.elevatorGrid) return;
+  const elevatorTasks = tasks.filter((task) => `${task.owner || ""}${task.discipline || ""}${task.system || ""}`.includes("电梯"));
+  const grouped = new Map();
+  elevatorTasks.forEach((task) => {
+    const building = resolveBuildingName(task.building || task.name) || "未填楼栋";
+    if (!grouped.has(building)) grouped.set(building, []);
+    grouped.get(building).push(task);
+  });
+  const rows = Array.from(grouped.entries()).map(([building, items]) => ({
+    building,
+    progress: averageProgress(items),
+    count: items.length,
+    done: items.filter((task) => Number(task.progress || 0) >= 100 || task.actual).length
+  }));
+  if (els.elevatorSummary) {
+    els.elevatorSummary.textContent = `${rows.length} 栋楼｜${elevatorTasks.length} 个电梯节点`;
+  }
+  els.elevatorGrid.innerHTML = rows.length
+    ? rows.map((row) => `
+      <article class="elevator-card">
+        <strong>${escapeHtml(row.building)}</strong>
+        <span><i style="width:${row.progress}%"></i></span>
+        <small>${row.progress}%｜完成 ${row.done}/${row.count}</small>
+      </article>
+    `).join("")
+    : `<article class="elevator-card"><strong>暂无电梯数据</strong><small>导入电梯单位模板后显示。</small></article>`;
+}
+
+function renderDictionaryPanel(scope) {
+  if (!els.dictionaryGrid) return;
+  const systems = uniqueSorted(scope.units.flatMap((unit) => unit.systems));
+  if (els.dictionarySummary) {
+    els.dictionarySummary.textContent = `${scope.buildings.length} 栋楼｜${scope.units.length} 个单位｜${systems.length} 项内容`;
+  }
+  const section = (title, items) => `
+    <article class="dictionary-card">
+      <h3>${title}<span>${items.length}</span></h3>
+      <div>${items.length ? items.map((item) => `<span>${escapeHtml(item)}</span>`).join("") : "<small>暂无数据</small>"}</div>
+    </article>
+  `;
+  els.dictionaryGrid.innerHTML = [
+    section("楼栋", scope.buildings.map((building) => `${building.name}（${building.floors}层）`)),
+    section("单位", scope.units.map((unit) => unit.name)),
+    section("施工内容", systems)
+  ].join("");
 }
 
 function renderScopeMaintenance(scope) {
@@ -1272,7 +1322,19 @@ function parseFloorNumber(value) {
 }
 
 function averageProgress(tasks) {
-  return Math.round(tasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / tasks.length);
+  const weighted = tasks.reduce((acc, task) => {
+    const weight = taskProgressWeight(task);
+    acc.total += Number(task.progress || 0) * weight;
+    acc.weight += weight;
+    return acc;
+  }, { total: 0, weight: 0 });
+  return weighted.weight ? Math.round(weighted.total / weighted.weight) : 0;
+}
+
+function taskProgressWeight(task) {
+  const weights = state.progressWeights || {};
+  const unit = currentProjectScope().units.find((item) => taskMatchesUnit(task, item));
+  return Math.max(0, Number(weights[unit?.name] ?? weights[task.owner] ?? 1));
 }
 
 function taskDetailText(task) {

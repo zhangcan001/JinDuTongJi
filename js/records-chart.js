@@ -157,7 +157,7 @@ function validateTaskPayload(data) {
   if (progress >= 100 && !data.actual) problems.push("完成率为 100% 时建议填写实际完成日期。");
   const duplicate = state.tasks.find((task) => task.projectId === state.selectedProjectId
     && task.id !== data.id
-    && taskKey(task) === taskKey({ projectId: state.selectedProjectId, building: data.building, floor: data.floor, system: data.system, name: data.name }));
+    && taskKey(task) === taskKey({ projectId: state.selectedProjectId, building: data.building, floor: data.floor, system: data.system, owner: data.owner, name: data.name }));
   if (duplicate) problems.push("相同楼栋、楼层、施工内容和节点名称已存在。");
   return problems;
 }

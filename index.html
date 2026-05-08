@@ -47,6 +47,10 @@
               <input id="globalSearchInput" placeholder="楼栋、节点、单位、问题" />
             </label>
             <label class="top-field">
+              单位
+              <select id="contractorUnitSelect" aria-label="选择单位权限"></select>
+            </label>
+            <label class="top-field">
               项目
               <select id="projectFilter" aria-label="选择项目"></select>
             </label>
@@ -310,6 +314,22 @@
 
           <section class="unit-grid" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
 
+          <section class="panel elevator-panel">
+            <div class="panel-heading">
+              <h2>电梯专项看板</h2>
+              <span id="elevatorSummary">按楼栋统计</span>
+            </div>
+            <div class="elevator-grid" id="elevatorGrid"></div>
+          </section>
+
+          <section class="panel dictionary-panel">
+            <div class="panel-heading">
+              <h2>数据字典</h2>
+              <span id="dictionarySummary">楼栋、单位、施工内容</span>
+            </div>
+            <div class="dictionary-grid" id="dictionaryGrid"></div>
+          </section>
+
           <section class="panel basement-section">
             <div class="panel-heading">
               <h2>地下室剖面舱段</h2>
@@ -336,6 +356,9 @@
               <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
               <button class="ghost-btn" id="exportIssuesBtn" type="button">导出整改台账</button>
               <button class="ghost-btn" id="exportReportBtn" type="button">导出周报</button>
+              <button class="ghost-btn" id="printReportBtn" type="button">打印PDF</button>
+              <button class="ghost-btn" id="exportImportDiffBtn" type="button">导出导入差异</button>
+              <button class="ghost-btn" id="autoIssueBtn" type="button">生成整改提醒</button>
               <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
               <label class="import-mode-field">
                 导入策略
@@ -355,6 +378,8 @@
             <div class="import-diff" id="importDiffPanel"></div>
             <div class="import-preview" id="importPreviewPanel"></div>
             <div class="baseline-panel" id="baselinePanel"></div>
+            <div class="weight-panel" id="weightPanel"></div>
+            <div class="import-version-panel" id="importVersionPanel"></div>
             <div class="restore-panel" id="restorePointPanel"></div>
             <div class="data-health-panel" id="dataHealthPanel"></div>
             <div class="audit-panel" id="auditLogPanel"></div>

@@ -148,7 +148,11 @@ function currentProjectItems(key) {
   if (!stateCache.projectItems.has(cacheKey)) {
     stateCache.projectItems.set(cacheKey, state[key].filter((item) => item.projectId === state.selectedProjectId));
   }
-  return stateCache.projectItems.get(cacheKey);
+  const items = stateCache.projectItems.get(cacheKey);
+  if (currentRole() === "contractor" && state.selectedContractorUnit && state.selectedContractorUnit !== "all") {
+    return items.filter((item) => `${item.owner || ""}${item.discipline || ""}`.includes(state.selectedContractorUnit.replace("单位", "")));
+  }
+  return items;
 }
 
 function currentProjectScope() {
@@ -165,6 +169,9 @@ function migrateState(nextState) {
   nextState.restorePoints = nextState.restorePoints || [];
   nextState.auditLogs = nextState.auditLogs || [];
   nextState.currentRole = nextState.currentRole || "admin";
+  nextState.selectedContractorUnit = nextState.selectedContractorUnit || "all";
+  nextState.progressWeights = nextState.progressWeights || {};
+  nextState.importVersions = nextState.importVersions || [];
   nextState.tasks = mergeFloorDemoTasks(nextState);
   nextState.tasks = (nextState.tasks || []).map((task) => ({
     plannedProgress: expectedProgress({ planned: task.planned, actual: task.actual }),
@@ -378,18 +385,29 @@ function renderImportValidation(validation) {
 
 function recordImportHistory(result, fileName) {
   state.importHistory = state.importHistory || [];
+  state.importVersions = state.importVersions || [];
   const locations = [...new Set(result.changed.map((item) => `${item.buildingName}|${item.floorLabel}`))];
-  state.importHistory.unshift({
+  const record = {
     id: createId(),
     projectId: state.selectedProjectId,
     fileName,
     time: new Date().toISOString(),
     created: result.created,
     updated: result.updated,
+    skipped: result.skipped || 0,
     scopeAdded: result.scopeAdded,
-    locations: locations.slice(0, 30)
+    locations: locations.slice(0, 30),
+    details: result.details || []
+  };
+  state.importHistory.unshift(record);
+  const snapshot = cloneData(state);
+  snapshot.importVersions = [];
+  state.importVersions.unshift({
+    ...record,
+    state: snapshot
   });
   state.importHistory = state.importHistory.slice(0, 12);
+  state.importVersions = state.importVersions.slice(0, 10);
 }
 
 function renderImportDiff(result) {
@@ -498,7 +516,7 @@ function clearPendingImport() {
 }
 
 function applyImportedRows(rows, mode = "upsert") {
-  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [] };
+  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [] };
   const importedKeys = new Set();
   rows.forEach((row) => {
     const normalized = normalizeImportRow(row);
@@ -535,16 +553,20 @@ function applyImportedRows(rows, mode = "upsert") {
     if (existing) {
       if (mode === "appendOnly") {
         result.skipped += 1;
+        result.details.push(importResultDetail("跳过", importedTask));
       } else {
         Object.assign(existing, importedTask, { id: existing.id });
         result.updated += 1;
+        result.details.push(importResultDetail("更新", importedTask));
       }
     } else {
       if (mode === "updateOnly") {
         result.skipped += 1;
+        result.details.push(importResultDetail("跳过", importedTask));
       } else {
         state.tasks.push(importedTask);
         result.created += 1;
+        result.details.push(importResultDetail("新增", importedTask));
       }
     }
     result.changed.push({
@@ -556,6 +578,20 @@ function applyImportedRows(rows, mode = "upsert") {
     });
   });
   return result;
+}
+
+function importResultDetail(type, task) {
+  return {
+    处理结果: type,
+    项目: currentProjectName(),
+    楼栋: task.building || "",
+    楼层: task.floor || "",
+    专业: task.discipline || "",
+    责任单位: task.owner || "",
+    施工内容: task.system || task.name || "",
+    计划完成: task.planned || "",
+    完成率: task.progress || 0
+  };
 }
 
 function normalizeImportRow(row) {
@@ -1239,6 +1275,112 @@ function exportWeeklyReportFile() {
   link.download = `监理周报-${currentProjectName()}-${localDateText(today)}.txt`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function printCurrentReport() {
+  if (els.weeklyReportOutput && !els.weeklyReportOutput.value) {
+    els.weeklyReportOutput.value = generateWeeklyReport();
+  }
+  window.print();
+}
+
+function exportLatestImportDiff() {
+  const latest = (state.importHistory || []).find((item) => item.projectId === state.selectedProjectId);
+  exportCsv("最近导入差异.csv", latest?.details?.length ? latest.details : [{ 提示: "暂无可导出的导入差异" }]);
+}
+
+function createIssuesFromDelayedTasks() {
+  if (!ensureCanEdit("生成整改提醒")) return;
+  const existingTaskIds = new Set(currentProjectItems("issues").map((issue) => issue.taskId).filter(Boolean));
+  const delayedTasks = currentProjectItems("tasks").filter((task) => getTaskStatus(task).className === "delay" && !existingTaskIds.has(task.id));
+  if (!delayedTasks.length) {
+    window.alert("当前没有需要自动生成整改提醒的新增滞后节点。");
+    return;
+  }
+  createRestorePoint("自动生成整改提醒");
+  delayedTasks.slice(0, 50).forEach((task) => {
+    state.issues.push({
+      id: createId(),
+      projectId: state.selectedProjectId,
+      title: `${task.building || ""}${task.floor || ""}${task.system || task.name}进度滞后`,
+      owner: task.owner || task.discipline || "未填责任单位",
+      deadline: localDateText(today),
+      severity: "重要",
+      status: "未整改",
+      taskId: task.id,
+      closedAt: "",
+      action: `请${task.owner || "责任单位"}针对 ${task.system || task.name} 提交赶工措施并更新实际完成情况。`,
+      reviewNote: "",
+      category: classifyDelayReason(task.note || task.name || "")
+    });
+  });
+  recordAudit("自动生成整改提醒", `生成 ${Math.min(50, delayedTasks.length)} 项`);
+  saveState();
+  render();
+}
+
+function renderImportVersionPanel() {
+  if (!els.importVersionPanel) return;
+  const versions = (state.importVersions || []).filter((item) => item.projectId === state.selectedProjectId).slice(0, 6);
+  els.importVersionPanel.innerHTML = `
+    <strong>导入版本</strong>
+    <div>
+      ${versions.length ? versions.map((item) => `
+        <article>
+          <div>
+            <strong>${escapeHtml(item.fileName)}</strong>
+            <small>${new Date(item.time).toLocaleString()}｜新增 ${item.created}｜更新 ${item.updated}｜跳过 ${item.skipped || 0}</small>
+          </div>
+          <button type="button" data-restore-import-version="${item.id}">恢复</button>
+        </article>
+      `).join("") : `<article><div><strong>暂无导入版本</strong><small>每次确认导入后会保存最近 10 次版本。</small></div></article>`}
+    </div>
+  `;
+  els.importVersionPanel.querySelectorAll("[data-restore-import-version]").forEach((button) => {
+    button.addEventListener("click", () => restoreImportVersion(button.dataset.restoreImportVersion));
+  });
+}
+
+function restoreImportVersion(versionId) {
+  if (!ensureCanEdit("恢复导入版本")) return;
+  const version = (state.importVersions || []).find((item) => item.id === versionId);
+  if (!version) return;
+  if (!window.confirm(`确定恢复到导入版本“${version.fileName}”吗？`)) return;
+  const keepVersions = state.importVersions || [];
+  const keepRestorePoints = state.restorePoints || [];
+  state = migrateState(cloneData(version.state));
+  state.importVersions = keepVersions;
+  state.restorePoints = keepRestorePoints;
+  recordAudit("恢复导入版本", version.fileName);
+  saveState();
+  render();
+}
+
+function renderWeightPanel() {
+  if (!els.weightPanel) return;
+  const weights = state.progressWeights || {};
+  const units = currentProjectScope().units;
+  els.weightPanel.innerHTML = `
+    <strong>进度权重</strong>
+    <p>为空时按 1 计算；可按专业单位调整总进度占比。</p>
+    <div class="weight-grid">
+      ${units.length ? units.map((unit) => `
+        <label>
+          ${escapeHtml(unit.name)}
+          <input type="number" min="0" max="100" step="0.5" value="${Number(weights[unit.name] ?? 1)}" data-weight-unit="${escapeHtml(unit.name)}" />
+        </label>
+      `).join("") : "<span>暂无专业单位</span>"}
+    </div>
+  `;
+  els.weightPanel.querySelectorAll("[data-weight-unit]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (!ensureCanEdit("调整进度权重")) return;
+      state.progressWeights[input.dataset.weightUnit] = Math.max(0, Number(input.value || 1));
+      recordAudit("调整进度权重", `${input.dataset.weightUnit}: ${input.value}`);
+      saveState();
+      render();
+    });
+  });
 }
 
 function renderAuditLogPanel() {

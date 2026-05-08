@@ -57,9 +57,7 @@ function renderDashboard() {
   const tasks = currentProjectItems("tasks");
   const issues = currentProjectItems("issues");
   const statuses = tasks.map(getTaskStatus);
-  const overall = tasks.length
-    ? Math.round(tasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / tasks.length)
-    : 0;
+  const overall = tasks.length ? averageProgress(tasks) : 0;
   const delayed = statuses.filter((status) => status.className === "delay").length;
   const dueSoon = statuses.filter((status) => status.className === "risk").length;
   const openIssues = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合").length;

@@ -39,6 +39,12 @@ function bindEvents() {
     saveState();
     render();
   });
+  els.contractorUnitSelect?.addEventListener("change", (event) => {
+    state.selectedContractorUnit = event.target.value;
+    recordAudit("切换单位权限", event.target.value === "all" ? "全部单位" : event.target.value);
+    saveState();
+    render();
+  });
   els.globalSearchInput?.addEventListener("input", (event) => {
     globalSearchQuery = event.target.value.trim();
     taskFilters.query = globalSearchQuery;
@@ -57,6 +63,9 @@ function bindEvents() {
   els.exportTasksBtn?.addEventListener("click", () => exportCsv("节点台账.csv", buildTaskExportRows(currentProjectItems("tasks"))));
   els.exportIssuesBtn?.addEventListener("click", () => exportCsv("整改台账.csv", buildIssueExportRows()));
   els.exportReportBtn?.addEventListener("click", exportWeeklyReportFile);
+  els.printReportBtn?.addEventListener("click", printCurrentReport);
+  els.exportImportDiffBtn?.addEventListener("click", exportLatestImportDiff);
+  els.autoIssueBtn?.addEventListener("click", createIssuesFromDelayedTasks);
   els.exportBackupBtn?.addEventListener("click", exportDataBackup);
   els.backupInput?.addEventListener("change", importDataBackup);
 
@@ -174,14 +183,27 @@ function render() {
   if (els.globalSearchInput && els.globalSearchInput.value !== globalSearchQuery) els.globalSearchInput.value = globalSearchQuery;
   applyRoleAccess();
   renderProjectFilter();
+  renderContractorUnitSelect();
   renderDashboard();
   renderTasks();
   renderIssues();
   renderProjectScope();
   renderBaselinePanel();
+  renderWeightPanel();
+  renderImportVersionPanel();
   renderRestorePointPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
+}
+
+function renderContractorUnitSelect() {
+  if (!els.contractorUnitSelect) return;
+  const units = currentProjectScope().units.map((unit) => unit.name);
+  els.contractorUnitSelect.innerHTML = [
+    `<option value="all">全部单位</option>`,
+    ...units.map((unit) => `<option value="${escapeHtml(unit)}">${escapeHtml(unit)}</option>`)
+  ].join("");
+  els.contractorUnitSelect.value = units.includes(state.selectedContractorUnit) ? state.selectedContractorUnit : "all";
 }
 
 function applyRoleAccess() {
