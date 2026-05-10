@@ -1,4 +1,4 @@
-﻿function renderProjectScope() {
+function renderProjectScope() {
   const scope = currentProjectScope();
   const systemCount = scope.units.reduce((sum, unit) => sum + unit.systems.length, 0);
   const tasks = currentProjectItems("tasks");
@@ -272,8 +272,8 @@ function fillBuildingScopeForm(building, scope) {
   els.buildingScopeForm.elements.name.focus({ preventScroll: true });
 }
 
-function deleteScopeBuilding(name) {
-  if (!window.confirm(`确定删除楼栋“${name}”吗？已有节点不会删除，但将不再显示到项目范围。`)) return;
+async function deleteScopeBuilding(name) {
+  if (!(await confirmAction(`确定删除楼栋“${name}”吗？已有节点不会删除，但将不再显示到项目范围。`, { title: "删除楼栋", okText: "删除" }))) return;
   if (!ensureCanEdit("删除楼栋")) return;
   createRestorePoint("删除楼栋范围");
   const scope = currentProjectScope();
@@ -353,8 +353,8 @@ function editScopeUnit(name) {
   if (els.saveUnitScopeBtn) els.saveUnitScopeBtn.textContent = "保存修改";
 }
 
-function deleteScopeUnit(name) {
-  if (!window.confirm(`确定删除专业“${name}”吗？已有进度节点不会删除。`)) return;
+async function deleteScopeUnit(name) {
+  if (!(await confirmAction(`确定删除专业“${name}”吗？已有进度节点不会删除。`, { title: "删除专业", okText: "删除" }))) return;
   if (!ensureCanEdit("删除专业")) return;
   createRestorePoint("删除专业范围");
   const scope = currentProjectScope();
@@ -1307,18 +1307,6 @@ function statusColor(status, progress) {
   if (status === "risk") return "#ffb84a";
   if (status === "done") return "#7dffcb";
   return cssColorForProgress(progress);
-}
-
-function resolveBuildingName(value) {
-  const text = String(value || "");
-  if (text.includes("地下")) return "地下室";
-  const scope = currentProjectScope();
-  return scope.buildings.find((building) => text.includes(building.name))?.name || text.replace(/（.*?）|\(.*?\)/g, "");
-}
-
-function parseFloorNumber(value) {
-  const match = String(value || "").match(/(\d+)/);
-  return match ? Number(match[1]) : 0;
 }
 
 function averageProgress(tasks) {

@@ -59,8 +59,8 @@
   });
 
   els.taskTable.querySelectorAll("[data-delete-task]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!window.confirm("确定删除这个进度节点吗？")) return;
+    button.addEventListener("click", async () => {
+      if (!(await confirmAction("确定删除这个进度节点吗？", { title: "删除进度节点", okText: "删除" }))) return;
       if (!ensureCanEdit("删除进度节点")) return;
       createRestorePoint("删除进度节点");
       const removed = state.tasks.find((task) => task.id === button.dataset.deleteTask);
@@ -99,7 +99,7 @@ function canEditTask(task) {
   const unit = state.selectedContractorUnit || "all";
   if (unit === "all") return true;
   const canEdit = `${task.owner || ""}${task.discipline || ""}`.includes(unit.replace("单位", ""));
-  if (!canEdit) window.alert("施工单位角色只能修改本单位节点。");
+  if (!canEdit) notifyUser("施工单位角色只能修改本单位节点。");
   return canEdit;
 }
 
@@ -198,11 +198,11 @@ function bulkExportTasks() {
   exportCsv("选中节点台账.csv", buildTaskExportRows(tasks));
 }
 
-function bulkDeleteTasks() {
+async function bulkDeleteTasks() {
   if (!ensureCanEdit("批量删除节点")) return;
   const tasks = selectedTasks();
   if (!tasks.length) return showToast("请先选择节点", "warn");
-  if (!window.confirm(`确定删除选中的 ${tasks.length} 个节点吗？`)) return;
+  if (!(await confirmAction(`确定删除选中的 ${tasks.length} 个节点吗？`, { title: "批量删除节点", okText: "删除" }))) return;
   createRestorePoint("批量删除节点");
   const ids = new Set(tasks.map((task) => task.id));
   state.tasks = state.tasks.filter((task) => !ids.has(task.id));
@@ -259,7 +259,7 @@ function saveTaskFromForm(event) {
   const data = Object.fromEntries(new FormData(form));
   const validation = validateTaskPayload(data);
   if (validation.length) {
-    window.alert(validation.join("\n"));
+    notifyUser(validation.join("\n"));
     return;
   }
   const payload = {
@@ -437,8 +437,8 @@ function renderIssues() {
   });
 
   document.querySelectorAll("[data-delete-issue]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!window.confirm("确定删除这个整改项吗？")) return;
+    button.addEventListener("click", async () => {
+      if (!(await confirmAction("确定删除这个整改项吗？", { title: "删除整改项", okText: "删除" }))) return;
       if (!ensureCanEdit("删除整改项")) return;
       createRestorePoint("删除整改项");
       const removed = state.issues.find((issue) => issue.id === button.dataset.deleteIssue);
@@ -484,7 +484,7 @@ function saveIssueFromForm(event) {
   const data = Object.fromEntries(new FormData(form));
   const validation = validateIssuePayload(data);
   if (validation.length) {
-    window.alert(validation.join("\n"));
+    notifyUser(validation.join("\n"));
     return;
   }
   const payload = {
@@ -663,13 +663,4 @@ function setDefaultDates() {
     if (!input.value) input.value = defaultDate;
   });
 }
-
-function localDateText(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-
 

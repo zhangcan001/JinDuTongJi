@@ -74,6 +74,14 @@ npx serve .
 http://127.0.0.1:4173/
 ```
 
+## 本地检查
+
+项目包含一组轻量业务规则测试，用于覆盖进度状态、整改流转、延期原因分类和 CSV 转义：
+
+```powershell
+npm test
+```
+
 ## 在线部署
 
 仓库已包含 GitHub Pages 工作流：`.github/workflows/pages.yml`。
@@ -106,8 +114,13 @@ https://zhangcan001.github.io/JinDuTongJi/
 - `index.html`：页面结构。
 - `styles.css`：太空舱中控大屏视觉样式。
 - `js/data.js`：演示数据、兼容性工具和楼层示例数据生成。
+- `js/business-rules.js`：进度状态、整改流转、延期原因分类、日期和 CSV 转义等可测试业务规则。
+- `js/project-helpers.js`：项目、楼栋、楼层、单位、节点去重键和导入范围补齐等共享辅助函数。
 - `js/dom.js`：页面元素引用和模型交互状态。
-- `js/state-import.js`：本地存储、权限、审计记录、Excel 导入校验、备份恢复、模板下载和 CSV/周报导出。
+- `js/ui-dialogs.js`：统一 Toast 提醒和确认弹窗。
+- `js/storage-audit.js`：本地存储、IndexedDB 镜像、审计记录、恢复点和完整备份恢复。
+- `js/state-import.js`：权限、项目状态迁移、计划基线、数据体检和 CSV/周报导出。
+- `js/import-excel.js`：Excel 导入校验、预览、确认导入、待复核导入、导入版本和模板下载。
 - `js/dashboard.js`：总览大屏、预警、偏差、单位排名、多维分析和监理周报生成。
 - `js/scope-model.js`：项目部位、Canvas 楼栋模型、楼层明细和地下室剖面。
 - `js/records-chart.js`：节点、整改项和进度曲线渲染。
