@@ -54,6 +54,7 @@
               项目
               <select id="projectFilter" aria-label="选择项目"></select>
             </label>
+            <button class="ghost-btn" id="officeModeBtn" type="button">办公模式</button>
             <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
           </div>
         </header>
@@ -125,6 +126,22 @@
             </article>
           </div>
 
+          <section class="panel dashboard-config-panel">
+            <div class="panel-heading">
+              <h2>驾驶舱配置</h2>
+              <span>按角色保留常用模块</span>
+            </div>
+            <div class="dashboard-config" id="dashboardConfig"></div>
+          </section>
+
+          <section class="panel today-panel">
+            <div class="panel-heading">
+              <h2>今日待办</h2>
+              <span id="todaySummary">按风险自动排序</span>
+            </div>
+            <div class="today-list" id="todayTodoList"></div>
+          </section>
+
           <div class="ops-grid">
             <section class="panel ops-panel">
               <div class="panel-heading">
@@ -189,6 +206,29 @@
         </section>
 
         <section class="view" id="scopeView">
+          <section class="panel project-admin-panel">
+            <div class="panel-heading">
+              <h2>项目管理</h2>
+              <span id="projectAdminSummary">新增、复制、归档项目</span>
+            </div>
+            <form class="project-admin-form" id="projectAdminForm">
+              <input name="id" type="hidden" />
+              <label>
+                项目名称
+                <input name="name" required placeholder="如：二期机电安装工程" />
+              </label>
+              <label>
+                复制范围自
+                <select name="copyFrom" id="projectCopyFromSelect"></select>
+              </label>
+              <div class="form-actions">
+                <button class="primary-btn" type="submit" id="projectSubmitBtn">新增项目</button>
+                <button class="ghost-btn" type="button" id="cancelProjectEditBtn">取消编辑</button>
+              </div>
+            </form>
+            <div class="project-admin-list" id="projectAdminList"></div>
+          </section>
+
           <section class="panel scope-command">
             <div class="panel-heading">
               <h2>项目部位与施工内容</h2>
@@ -346,32 +386,48 @@
               <span>批量更新全局数据</span>
             </div>
             <div class="import-grid">
-              <label class="file-drop">
-                <span>选择 .xlsx / .xls / .csv 文件</span>
-                <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
-              </label>
-              <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载多表模板</button>
-              <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
-              <button class="ghost-btn" id="exportDelayBtn" type="button">导出滞后清单</button>
-              <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
-              <button class="ghost-btn" id="exportIssuesBtn" type="button">导出整改台账</button>
-              <button class="ghost-btn" id="exportReportBtn" type="button">导出周报</button>
-              <button class="ghost-btn" id="printReportBtn" type="button">打印PDF</button>
-              <button class="ghost-btn" id="exportImportDiffBtn" type="button">导出导入差异</button>
-              <button class="ghost-btn" id="autoIssueBtn" type="button">生成整改提醒</button>
-              <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
-              <label class="import-mode-field">
-                导入策略
-                <select id="importModeSelect">
-                  <option value="upsert">更新已有并追加新增</option>
-                  <option value="updateOnly">只更新已有</option>
-                  <option value="appendOnly">只追加新增</option>
-                </select>
-              </label>
-              <label class="ghost-btn import-backup">
-                恢复备份
-                <input id="backupInput" type="file" accept=".json,application/json" />
-              </label>
+              <div class="import-group import-primary">
+                <strong>导入</strong>
+                <label class="file-drop">
+                  <span>选择 .xlsx / .xls / .csv 文件</span>
+                  <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
+                </label>
+                <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载多表模板</button>
+                <label class="import-mode-field">
+                  导入策略
+                  <select id="importModeSelect">
+                    <option value="review">先进入待复核</option>
+                    <option value="upsert">更新已有并追加新增</option>
+                    <option value="updateOnly">只更新已有</option>
+                    <option value="appendOnly">只追加新增</option>
+                  </select>
+                </label>
+              </div>
+              <div class="import-group">
+                <strong>导出</strong>
+                <button class="ghost-btn" id="exportDelayBtn" type="button">导出滞后清单</button>
+                <button class="ghost-btn" id="exportTasksBtn" type="button">导出节点台账</button>
+                <button class="ghost-btn" id="exportIssuesBtn" type="button">导出整改台账</button>
+                <button class="ghost-btn" id="exportReportBtn" type="button">导出周报</button>
+                <button class="ghost-btn" id="printReportBtn" type="button">打印PDF</button>
+                <button class="ghost-btn" id="exportImportDiffBtn" type="button">导出导入差异</button>
+                <button class="ghost-btn" id="exportImportErrorsBtn" type="button">导出错误行</button>
+              </div>
+              <div class="import-group">
+                <strong>数据安全</strong>
+                <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
+                <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
+                <label class="ghost-btn import-backup">
+                  恢复备份
+                  <input id="backupInput" type="file" accept=".json,application/json" />
+                </label>
+              </div>
+              <div class="import-group">
+                <strong>整改处理</strong>
+                <button class="ghost-btn" id="autoIssueBtn" type="button">生成整改提醒</button>
+                <button class="ghost-btn" id="applyDataFixBtn" type="button">自动修复建议</button>
+                <button class="ghost-btn" id="approveImportsBtn" type="button">确认待复核</button>
+              </div>
               <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。</p>
             </div>
             <div class="validation-report" id="importValidationReport"></div>
@@ -487,10 +543,21 @@
               </label>
               <button class="ghost-btn" id="taskFilterResetBtn" type="button">清除筛选</button>
             </div>
+            <div class="bulk-toolbar" id="bulkTaskToolbar">
+              <label><input type="checkbox" id="selectAllTasks" /> 选择本页</label>
+              <span id="bulkTaskSummary">已选 0 项</span>
+              <button class="ghost-btn" type="button" data-bulk-progress="0">设为0%</button>
+              <button class="ghost-btn" type="button" data-bulk-progress="50">设为50%</button>
+              <button class="ghost-btn" type="button" data-bulk-progress="100">设为100%</button>
+              <button class="ghost-btn" type="button" id="bulkIssueBtn">批量生成整改</button>
+              <button class="ghost-btn" type="button" id="bulkExportBtn">导出选中</button>
+              <button class="ghost-btn danger-action" type="button" id="bulkDeleteBtn">批量删除</button>
+            </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
+                    <th>选择</th>
                     <th>节点</th>
                     <th>部位/楼层/内容</th>
                     <th>专业</th>
@@ -545,6 +612,23 @@
                 复验/闭合日期
                 <input name="closedAt" type="date" />
               </label>
+              <label>
+                整改次数
+                <input name="rectifyCount" type="number" min="0" max="20" value="0" />
+              </label>
+              <label>
+                复验结果
+                <select name="reviewResult">
+                  <option value="">未复验</option>
+                  <option>同意闭合</option>
+                  <option>继续整改</option>
+                  <option>部分完成</option>
+                </select>
+              </label>
+              <label>
+                延期原因
+                <input name="delayReason" placeholder="如：材料未进场、劳动力不足" />
+              </label>
               <label class="full">
                 监理要求
                 <textarea name="action" rows="2" required placeholder="明确赶工、资源投入、专项会议或书面回复要求"></textarea>
@@ -555,6 +639,7 @@
               </label>
               <div class="form-actions full">
                 <button class="primary-btn" type="submit" id="issueSubmitBtn">添加整改项</button>
+                <button class="ghost-btn" type="button" id="exportNoticeBtn">导出整改通知单</button>
                 <button class="ghost-btn" type="button" id="cancelIssueEditBtn">取消编辑</button>
               </div>
             </form>
@@ -564,6 +649,7 @@
 
       </main>
     </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <button class="carousel-exit-btn" id="carouselExitBtn" type="button">退出轮播</button>
 
     <script src="./js/data.js"></script>

@@ -6,6 +6,10 @@
   taskFilters.page = Math.min(Math.max(1, taskFilters.page), totalPages);
   const pageStart = (taskFilters.page - 1) * taskFilters.pageSize;
   const pageTasks = filteredTasks.slice(pageStart, pageStart + taskFilters.pageSize);
+  window.currentTaskPageIds = pageTasks.map((task) => task.id);
+  [...selectedTaskIds].forEach((taskId) => {
+    if (!state.tasks.some((task) => task.id === taskId)) selectedTaskIds.delete(taskId);
+  });
   els.taskCount.textContent = filteredTasks.length === tasks.length ? `${tasks.length} 项` : `${filteredTasks.length} / ${tasks.length} 项`;
   els.taskTable.innerHTML = pageTasks.length
     ? pageTasks
@@ -13,14 +17,15 @@
           const status = getTaskStatus(task);
           return `
             <tr>
+              <td><input type="checkbox" data-select-task="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""}></td>
               <td><strong>${escapeHtml(task.name)}</strong><br><small>${escapeHtml(task.note || "")}</small></td>
-              <td>${escapeHtml(task.building || "-")}<br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
+              <td><button class="text-action" type="button" data-locate-task="${task.id}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
               <td>${escapeHtml(task.discipline)}</td>
               <td>${escapeHtml(task.owner)}</td>
               <td>${task.planned}</td>
               <td>${task.actual || "-"}</td>
-              <td>${task.progress}%<br><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small></td>
-              <td><span class="status ${status.className}">${status.label}</span></td>
+              <td>${task.progress}%<br><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${task.id}">0%</button><button data-quick-progress="50" data-task-id="${task.id}">50%</button><button data-quick-progress="100" data-task-id="${task.id}">100%</button></div></td>
+              <td><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
               <td>
                 <div class="row-actions">
                   <button class="icon-btn" title="编辑节点" data-edit-task="${task.id}">✎</button>
@@ -31,12 +36,26 @@
           `;
         })
         .join("")
-    : `<tr><td colspan="9">当前筛选条件下暂无节点。</td></tr>`;
+    : `<tr><td colspan="10">当前筛选条件下暂无节点。</td></tr>`;
 
   renderTaskPagination(filteredTasks.length, totalPages);
+  updateBulkTaskToolbar();
 
+  els.taskTable.querySelectorAll("[data-select-task]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) selectedTaskIds.add(input.dataset.selectTask);
+      else selectedTaskIds.delete(input.dataset.selectTask);
+      updateBulkTaskToolbar();
+    });
+  });
   els.taskTable.querySelectorAll("[data-edit-task]").forEach((button) => {
     button.addEventListener("click", () => editTask(button.dataset.editTask));
+  });
+  els.taskTable.querySelectorAll("[data-locate-task]").forEach((button) => {
+    button.addEventListener("click", () => locateTaskInModel(button.dataset.locateTask));
+  });
+  els.taskTable.querySelectorAll("[data-quick-progress]").forEach((button) => {
+    button.addEventListener("click", () => quickUpdateTaskProgress(button.dataset.taskId, Number(button.dataset.quickProgress)));
   });
 
   els.taskTable.querySelectorAll("[data-delete-task]").forEach((button) => {
@@ -45,6 +64,7 @@
       if (!ensureCanEdit("删除进度节点")) return;
       createRestorePoint("删除进度节点");
       const removed = state.tasks.find((task) => task.id === button.dataset.deleteTask);
+      if (!canEditTask(removed)) return;
       state.tasks = state.tasks.filter((task) => task.id !== button.dataset.deleteTask);
       recordAudit("删除进度节点", removed?.name || "");
       saveState();
@@ -73,10 +93,131 @@ function renderTaskPagination(total, totalPages) {
   });
 }
 
+function canEditTask(task) {
+  if (!task) return false;
+  if (currentRole() !== "contractor") return true;
+  const unit = state.selectedContractorUnit || "all";
+  if (unit === "all") return true;
+  const canEdit = `${task.owner || ""}${task.discipline || ""}`.includes(unit.replace("单位", ""));
+  if (!canEdit) window.alert("施工单位角色只能修改本单位节点。");
+  return canEdit;
+}
+
+function quickUpdateTaskProgress(taskId, progress) {
+  if (!ensureCanEdit("快速更新节点")) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!canEditTask(task)) return;
+  createRestorePoint("快速更新进度");
+  task.progress = progress;
+  task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
+  recordAudit("快速更新节点", `${task.name}: ${progress}%`);
+  saveState();
+  render();
+  showToast("节点进度已更新");
+}
+
+function locateTaskInModel(taskId) {
+  const task = state.tasks.find((item) => item.id === taskId);
+  if (!task) return;
+  selectedBuildingName = resolveBuildingName(task.building || task.name);
+  selectedModelFloor = normalizedFloorKey(task.floor || "");
+  if (!selectedModelFloor || selectedModelFloor === "整栋") selectedModelFloor = "1层";
+  switchView("scope");
+  renderProjectScope();
+}
+
+function updateBulkTaskToolbar() {
+  if (els.bulkTaskSummary) els.bulkTaskSummary.textContent = `已选 ${selectedTaskIds.size} 项`;
+  if (els.selectAllTasks) {
+    const pageIds = window.currentTaskPageIds || [];
+    els.selectAllTasks.checked = pageIds.length > 0 && pageIds.every((id) => selectedTaskIds.has(id));
+  }
+}
+
+function toggleSelectPageTasks(event) {
+  const pageIds = window.currentTaskPageIds || [];
+  pageIds.forEach((id) => {
+    if (event.target.checked) selectedTaskIds.add(id);
+    else selectedTaskIds.delete(id);
+  });
+  renderTasks();
+}
+
+function selectedTasks() {
+  return [...selectedTaskIds].map((id) => state.tasks.find((task) => task.id === id)).filter(Boolean);
+}
+
+function bulkSetTaskProgress(progress) {
+  if (!ensureCanEdit("批量更新节点")) return;
+  const tasks = selectedTasks().filter(canEditTask);
+  if (!tasks.length) return showToast("请先选择节点", "warn");
+  createRestorePoint("批量更新进度");
+  tasks.forEach((task) => {
+    task.progress = progress;
+    task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
+  });
+  recordAudit("批量更新节点", `${tasks.length} 项设为 ${progress}%`);
+  saveState();
+  render();
+  showToast(`已批量更新 ${tasks.length} 项`);
+}
+
+function bulkCreateIssues() {
+  if (!ensureCanEdit("批量生成整改")) return;
+  const tasks = selectedTasks().filter((task) => getTaskStatus(task).className !== "done");
+  if (!tasks.length) return showToast("请选择未完成节点", "warn");
+  createRestorePoint("批量生成整改");
+  tasks.forEach((task) => {
+    state.issues.push({
+      id: createId(),
+      projectId: task.projectId,
+      title: `${task.building || ""}${task.floor || ""}${task.system || task.name}需整改跟踪`,
+      owner: task.owner || task.discipline || "未填责任单位",
+      deadline: localDateText(today),
+      severity: getTaskStatus(task).className === "delay" ? "重要" : "一般",
+      status: "未整改",
+      taskId: task.id,
+      closedAt: "",
+      action: `请${task.owner || "责任单位"}更新 ${task.system || task.name} 进展并反馈纠偏措施。`,
+      reviewNote: "",
+      rectifyCount: 0,
+      reviewResult: "",
+      delayReason: classifyDelayReason(task.note || task.name || ""),
+      category: classifyDelayReason(task.note || task.name || "")
+    });
+  });
+  recordAudit("批量生成整改", `${tasks.length} 项`);
+  saveState();
+  render();
+  showToast(`已生成 ${tasks.length} 条整改`);
+}
+
+function bulkExportTasks() {
+  const tasks = selectedTasks();
+  if (!tasks.length) return showToast("请先选择节点", "warn");
+  exportCsv("选中节点台账.csv", buildTaskExportRows(tasks));
+}
+
+function bulkDeleteTasks() {
+  if (!ensureCanEdit("批量删除节点")) return;
+  const tasks = selectedTasks();
+  if (!tasks.length) return showToast("请先选择节点", "warn");
+  if (!window.confirm(`确定删除选中的 ${tasks.length} 个节点吗？`)) return;
+  createRestorePoint("批量删除节点");
+  const ids = new Set(tasks.map((task) => task.id));
+  state.tasks = state.tasks.filter((task) => !ids.has(task.id));
+  selectedTaskIds.clear();
+  recordAudit("批量删除节点", `${tasks.length} 项`);
+  saveState();
+  render();
+  showToast(`已删除 ${tasks.length} 项`);
+}
+
 function editTask(taskId) {
   if (!ensureCanEdit("编辑进度节点")) return;
   const task = state.tasks.find((item) => item.id === taskId);
   if (!task || !els.taskForm) return;
+  if (!canEditTask(task)) return;
   switchView("schedule");
   const form = els.taskForm;
   Object.entries({
@@ -135,6 +276,7 @@ function saveTaskFromForm(event) {
     note: data.note
   };
   const existing = data.id ? state.tasks.find((task) => task.id === data.id) : null;
+  if (existing && !canEditTask(existing)) return;
   if (existing) {
     Object.assign(existing, payload);
     recordAudit("编辑进度节点", payload.name);
@@ -145,6 +287,7 @@ function saveTaskFromForm(event) {
   resetTaskForm();
   saveState();
   render();
+  showToast(existing ? "节点已保存" : "节点已添加");
 }
 
 function validateTaskPayload(data) {
@@ -169,6 +312,7 @@ function updateTaskFiltersFromControls() {
   taskFilters.owner = els.taskOwnerFilter?.value || "all";
   taskFilters.sort = els.taskSortSelect?.value || "plannedAsc";
   taskFilters.page = 1;
+  persistUiPreferences();
   renderTasks();
 }
 
@@ -255,6 +399,9 @@ function renderIssues() {
               <p>${escapeHtml(issue.action)}</p>
               <div class="issue-meta">
                 ${linkedTask ? `<span>关联：${escapeHtml(linkedTask.building || "-")}｜${escapeHtml(linkedTask.floor || "-")}｜${escapeHtml(linkedTask.system || linkedTask.name)}</span>` : "<span>未关联节点</span>"}
+                ${issue.delayReason ? `<span>延期原因：${escapeHtml(issue.delayReason)}</span>` : ""}
+                ${issue.rectifyCount ? `<span>整改次数：${Number(issue.rectifyCount || 0)}</span>` : ""}
+                ${issue.reviewResult ? `<span>复验结果：${escapeHtml(issue.reviewResult)}</span>` : ""}
                 ${issue.reviewNote ? `<span>复验：${escapeHtml(issue.reviewNote)}</span>` : ""}
                 ${issue.closedAt ? `<span>闭合日期：${escapeHtml(issue.closedAt)}</span>` : ""}
               </div>
@@ -277,9 +424,11 @@ function renderIssues() {
       const issue = state.issues.find((item) => item.id === button.dataset.advanceIssue);
       issue.status = nextIssueStatus(issue.status);
       if (normalizeIssueStatus(issue.status) === "已闭合" && !issue.closedAt) issue.closedAt = localDateText(today);
+      if (normalizeIssueStatus(issue.status) === "整改中") issue.rectifyCount = Number(issue.rectifyCount || 0) + 1;
       recordAudit("推进整改状态", `${issue.title} -> ${issue.status}`);
       saveState();
       render();
+      showToast("整改状态已更新");
     });
   });
 
@@ -297,6 +446,7 @@ function renderIssues() {
       recordAudit("删除整改项", removed?.title || "");
       saveState();
       render();
+      showToast("整改项已删除");
     });
   });
 }
@@ -345,6 +495,9 @@ function saveIssueFromForm(event) {
     severity: data.severity,
     taskId: data.taskId,
     closedAt: data.closedAt,
+    rectifyCount: Number(data.rectifyCount || 0),
+    reviewResult: data.reviewResult,
+    delayReason: data.delayReason,
     action: data.action,
     reviewNote: data.reviewNote,
     category: classifyDelayReason(`${data.title || ""}${data.action || ""}`)
@@ -361,6 +514,7 @@ function saveIssueFromForm(event) {
   resetIssueForm();
   saveState();
   render();
+  showToast(existing ? "整改项已保存" : "整改项已添加");
 }
 
 function validateIssuePayload(data) {
@@ -386,6 +540,9 @@ function editIssue(issueId) {
     severity: issue.severity || "一般",
     taskId: issue.taskId || "",
     closedAt: issue.closedAt || "",
+    rectifyCount: Number(issue.rectifyCount || 0),
+    reviewResult: issue.reviewResult || "",
+    delayReason: issue.delayReason || "",
     action: issue.action || "",
     reviewNote: issue.reviewNote || ""
   }).forEach(([name, value]) => {

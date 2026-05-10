@@ -19,6 +19,15 @@ function saveState() {
   }
 }
 
+function showToast(message, tone = "ok") {
+  if (!els.toast) return;
+  els.toast.textContent = message;
+  els.toast.dataset.tone = tone;
+  els.toast.classList.add("show");
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => els.toast.classList.remove("show"), 2400);
+}
+
 function invalidateStateCache() {
   if (!stateCache) return;
   stateCache.version += 1;
@@ -172,9 +181,24 @@ function migrateState(nextState) {
   nextState.selectedContractorUnit = nextState.selectedContractorUnit || "all";
   nextState.progressWeights = nextState.progressWeights || {};
   nextState.importVersions = nextState.importVersions || [];
+  nextState.pendingImports = nextState.pendingImports || [];
+  nextState.archivedProjectIds = nextState.archivedProjectIds || [];
+  nextState.uiPreferences = {
+    activeView: "dashboard",
+    officeMode: false,
+    taskFilters: {},
+    modelFilters: {},
+    lastBackupAt: "",
+    dashboardCards: ["today", "ops", "weekly", "chart", "analytics"],
+    ...(nextState.uiPreferences || {})
+  };
+  if ((nextState.uiPreferences.dashboardCards || []).some((item) => ["deviation", "dependency", "ranking"].includes(item))) {
+    nextState.uiPreferences.dashboardCards = ["today", "ops", "weekly", "chart", "analytics"];
+  }
   nextState.tasks = mergeFloorDemoTasks(nextState);
   nextState.tasks = (nextState.tasks || []).map((task) => ({
     plannedProgress: expectedProgress({ planned: task.planned, actual: task.actual }),
+    reviewStatus: "approved",
     ...task
   }));
   nextState.issues = (nextState.issues || []).map((issue) => ({
@@ -182,6 +206,10 @@ function migrateState(nextState) {
     taskId: "",
     reviewNote: "",
     closedAt: "",
+    rectifyCount: 0,
+    reviewResult: "",
+    delayReason: "",
+    responsiblePerson: "",
     ...issue,
     status: normalizeIssueStatus(issue.status)
   }));
@@ -491,7 +519,9 @@ function confirmPendingImport() {
   const { rows, validation, fileName } = pendingImport;
   const mode = els.importModeSelect?.value || "upsert";
   createRestorePoint(`导入 ${fileName}`);
-  const result = applyImportedRows(validation.validRows, mode);
+  const result = mode === "review"
+    ? stageImportedRowsForReview(validation.validRows, fileName)
+    : applyImportedRows(validation.validRows, mode);
   lastImportFocus = result.changed[0] || null;
   if (lastImportFocus) {
     state.selectedProjectId = lastImportFocus.projectId;
@@ -499,14 +529,66 @@ function confirmPendingImport() {
     selectedModelFloor = lastImportFocus.floorLabel;
   }
   recordImportHistory(result, fileName);
-  recordAudit("导入进度数据", `${fileName}：新增 ${result.created} 项，更新 ${result.updated} 项，跳过 ${result.skipped} 项`);
+  recordAudit(mode === "review" ? "导入待复核数据" : "导入进度数据", `${fileName}：新增 ${result.created} 项，更新 ${result.updated} 项，跳过 ${result.skipped} 项`);
   saveState();
   pendingImport = null;
   render();
-  els.importResult.textContent = `已导入 ${rows.length} 行：成功 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行；新增 ${result.created} 个节点，更新 ${result.updated} 个节点，跳过 ${result.skipped} 个节点。`;
+  els.importResult.textContent = mode === "review"
+    ? `已进入待复核 ${result.created} 行：请点击“确认待复核”后计入正式进度。`
+    : `已导入 ${rows.length} 行：成功 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行；新增 ${result.created} 个节点，更新 ${result.updated} 个节点，跳过 ${result.skipped} 个节点。`;
+  showToast(mode === "review" ? "导入数据已进入待复核" : "导入完成");
   renderImportValidation(validation);
   renderImportDiff(result);
   renderImportPreview(null);
+}
+
+function stageImportedRowsForReview(rows, fileName) {
+  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [] };
+  state.pendingImports = state.pendingImports || [];
+  rows.forEach((row) => {
+    const normalized = normalizeImportRow(row);
+    if (!normalized.name && !normalized.system) return;
+    const project = findOrCreateProject(normalized.projectName || currentProjectName());
+    const scope = ensureProjectScope(project.id);
+    result.scopeAdded += ensureScopeItems(scope, normalized);
+    const importedTask = normalizedRowToTask(normalized, project.id);
+    state.pendingImports.push({
+      id: createId(),
+      projectId: project.id,
+      fileName,
+      createdAt: new Date().toISOString(),
+      task: importedTask
+    });
+    result.created += 1;
+    result.details.push(importResultDetail("待复核", importedTask));
+    result.changed.push({
+      projectId: project.id,
+      buildingName: resolveBuildingName(normalized.building),
+      floorLabel: normalized.building.includes("地下") || normalized.floor.includes("地下")
+        ? "地下室"
+        : `${parseFloorNumber(normalized.floor) || 1}层`
+    });
+  });
+  return result;
+}
+
+function normalizedRowToTask(normalized, projectId) {
+  return {
+    id: createId(),
+    projectId,
+    name: normalized.name || `${normalized.building} ${normalized.system}`,
+    discipline: normalized.discipline || inferDiscipline(normalized.owner, normalized.system),
+    owner: normalized.owner || normalized.discipline || "未填责任单位",
+    building: normalized.building,
+    floor: normalized.floor,
+    system: normalized.system,
+    planned: normalized.planned || localDateText(today),
+    actual: normalized.actual,
+    progress: clampProgress(normalized.progress),
+    note: normalized.note,
+    reviewStatus: "approved",
+    plannedProgress: clampProgress(normalized.plannedProgress || expectedProgress({ planned: normalized.planned || localDateText(today) }))
+  };
 }
 
 function clearPendingImport() {
@@ -526,21 +608,7 @@ function applyImportedRows(rows, mode = "upsert") {
     const scope = ensureProjectScope(project.id);
     result.scopeAdded += ensureScopeItems(scope, normalized);
 
-    const importedTask = {
-      id: createId(),
-      projectId: project.id,
-      name: normalized.name || `${normalized.building} ${normalized.system}`,
-      discipline: normalized.discipline || inferDiscipline(normalized.owner, normalized.system),
-      owner: normalized.owner || normalized.discipline || "未填责任单位",
-      building: normalized.building,
-      floor: normalized.floor,
-      system: normalized.system,
-      planned: normalized.planned || localDateText(today),
-      actual: normalized.actual,
-      progress: clampProgress(normalized.progress),
-      note: normalized.note,
-      plannedProgress: clampProgress(normalized.plannedProgress || expectedProgress({ planned: normalized.planned || localDateText(today) }))
-    };
+    const importedTask = normalizedRowToTask(normalized, project.id);
 
     const importKey = taskKey(importedTask);
     if (importedKeys.has(importKey)) {
@@ -1245,6 +1313,9 @@ function exportDataBackup() {
   link.download = `监理进度数据备份-${localDateText(today)}.json`;
   link.click();
   URL.revokeObjectURL(url);
+  state.uiPreferences.lastBackupAt = new Date().toISOString();
+  saveState();
+  showToast("数据备份已导出");
 }
 
 function buildIssueExportRows() {
@@ -1259,6 +1330,9 @@ function buildIssueExportRows() {
       闭环状态: normalizeIssueStatus(issue.status),
       关联节点: linkedTask ? `${linkedTask.building || ""}${linkedTask.floor || ""}${linkedTask.system || linkedTask.name || ""}` : "",
       问题类别: issue.category || classifyDelayReason(issue.action || issue.title || ""),
+      延期原因: issue.delayReason || "",
+      整改次数: Number(issue.rectifyCount || 0),
+      复验结果: issue.reviewResult || "",
       监理要求: issue.action || "",
       复验意见: issue.reviewNote || "",
       闭合日期: issue.closedAt || ""
@@ -1268,13 +1342,44 @@ function buildIssueExportRows() {
 
 function exportWeeklyReportFile() {
   const report = els.weeklyReportOutput?.value || generateWeeklyReport();
-  const blob = new Blob([report], { type: "text/plain;charset=utf-8" });
+  const html = `<!doctype html><html><head><meta charset="UTF-8"><title>监理周报</title><style>body{font-family:"Microsoft YaHei",Arial,sans-serif;line-height:1.8;color:#111827;padding:40px;}h1{text-align:center;font-size:24px;}pre{white-space:pre-wrap;font:inherit;} .meta{text-align:right;color:#6b7280;}</style></head><body><h1>${escapeHtml(currentProjectName())}监理周报</h1><div class="meta">${localDateText(today)}</div><pre>${escapeHtml(report)}</pre></body></html>`;
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `监理周报-${currentProjectName()}-${localDateText(today)}.txt`;
+  link.download = `监理周报-${currentProjectName()}-${localDateText(today)}.html`;
   link.click();
   URL.revokeObjectURL(url);
+  showToast("正式周报已导出");
+}
+
+function exportRectificationNotice() {
+  const issues = currentProjectItems("issues").filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合");
+  const lines = [
+    `${currentProjectName()}整改通知单`,
+    `签发日期：${localDateText(today)}`,
+    "",
+    "请相关责任单位对以下问题限期整改，并在整改完成后提交复验申请：",
+    "",
+    ...(issues.length ? issues.map((issue, index) => [
+      `${index + 1}. ${issue.title}`,
+      `责任单位：${issue.owner || "-"}`,
+      `要求完成：${issue.deadline || "-"}`,
+      `严重程度：${issue.severity || "-"}`,
+      `监理要求：${issue.action || "-"}`,
+      issue.delayReason ? `延期原因：${issue.delayReason}` : "",
+      ""
+    ].filter(Boolean).join("\n")) : ["当前无未闭合整改项。"]),
+    "监理单位意见：请施工单位明确责任人、资源投入和完成时间，逾期未完成的纳入例会重点督办。"
+  ].join("\n");
+  const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `整改通知单-${currentProjectName()}-${localDateText(today)}.txt`;
+  link.click();
+  URL.revokeObjectURL(url);
+  showToast("整改通知单已导出");
 }
 
 function printCurrentReport() {
@@ -1317,6 +1422,7 @@ function createIssuesFromDelayedTasks() {
   recordAudit("自动生成整改提醒", `生成 ${Math.min(50, delayedTasks.length)} 项`);
   saveState();
   render();
+  showToast(`已生成 ${Math.min(50, delayedTasks.length)} 条整改提醒`);
 }
 
 function renderImportVersionPanel() {
@@ -1404,9 +1510,13 @@ function renderAuditLogPanel() {
 function renderDataHealthPanel() {
   if (!els.dataHealthPanel) return;
   const report = buildDataHealthReport();
+  const pending = (state.pendingImports || []).filter((item) => item.projectId === state.selectedProjectId);
+  const backupText = state.uiPreferences?.lastBackupAt
+    ? `上次备份 ${new Date(state.uiPreferences.lastBackupAt).toLocaleString()}`
+    : "尚未导出过完整备份";
   els.dataHealthPanel.innerHTML = `
     <strong>数据体检</strong>
-    <p>${report.summary}</p>
+    <p>${report.summary}｜待复核 ${pending.length} 条｜${backupText}</p>
     <div class="health-grid">
       ${report.sections.map((section) => `
         <article class="${section.items.length ? "warn" : "ok"}">
@@ -1420,6 +1530,83 @@ function renderDataHealthPanel() {
       `).join("")}
     </div>
   `;
+}
+
+function exportImportErrors() {
+  if (!pendingImport?.validation?.invalidRows?.length) {
+    showToast("当前没有可导出的导入错误行", "warn");
+    return;
+  }
+  const rows = pendingImport.validation.invalidRows.map((item) => ({
+    行号: item.rowNumber,
+    问题: item.problems.join("、"),
+    楼栋: item.normalized?.building || "",
+    楼层: item.normalized?.floor || "",
+    施工内容: item.normalized?.system || item.normalized?.name || ""
+  }));
+  exportCsv("导入错误行.csv", rows);
+  showToast("错误行已导出");
+}
+
+function approvePendingImports() {
+  if (!ensureCanEdit("确认待复核导入")) return;
+  const pending = (state.pendingImports || []).filter((item) => item.projectId === state.selectedProjectId);
+  if (!pending.length) {
+    showToast("当前项目没有待复核导入", "warn");
+    return;
+  }
+  createRestorePoint("确认待复核导入");
+  let created = 0;
+  let updated = 0;
+  pending.forEach((item) => {
+    const importedTask = { ...item.task, reviewStatus: "approved" };
+    const existing = findExistingTaskForImport(importedTask);
+    if (existing) {
+      Object.assign(existing, importedTask, { id: existing.id });
+      updated += 1;
+    } else {
+      state.tasks.push(importedTask);
+      created += 1;
+    }
+  });
+  state.pendingImports = (state.pendingImports || []).filter((item) => item.projectId !== state.selectedProjectId);
+  recordAudit("确认待复核导入", `新增 ${created}，更新 ${updated}`);
+  saveState();
+  render();
+  showToast(`待复核已确认：新增 ${created}，更新 ${updated}`);
+}
+
+function applyDataFixSuggestions() {
+  if (!ensureCanEdit("自动修复数据")) return;
+  const tasks = currentProjectItems("tasks");
+  if (!tasks.length) {
+    showToast("当前没有可修复的节点", "warn");
+    return;
+  }
+  createRestorePoint("自动修复数据建议");
+  let fixed = 0;
+  tasks.forEach((task) => {
+    if (Number(task.progress || 0) >= 100 && !task.actual) {
+      task.actual = task.planned || localDateText(today);
+      fixed += 1;
+    }
+    if (task.actual && Number(task.progress || 0) < 100) {
+      task.progress = 100;
+      fixed += 1;
+    }
+    if (!task.floor && task.building && !String(task.building).includes("地下")) {
+      task.floor = "1层";
+      fixed += 1;
+    }
+    if (!task.owner && task.discipline) {
+      task.owner = task.discipline;
+      fixed += 1;
+    }
+  });
+  recordAudit("自动修复数据建议", `修复 ${fixed} 处`);
+  saveState();
+  render();
+  showToast(fixed ? `已自动修复 ${fixed} 处数据` : "未发现可自动修复项", fixed ? "ok" : "warn");
 }
 
 function buildDataHealthReport() {

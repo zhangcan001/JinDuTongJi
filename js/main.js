@@ -65,9 +65,15 @@ function bindEvents() {
   els.exportReportBtn?.addEventListener("click", exportWeeklyReportFile);
   els.printReportBtn?.addEventListener("click", printCurrentReport);
   els.exportImportDiffBtn?.addEventListener("click", exportLatestImportDiff);
+  els.exportImportErrorsBtn?.addEventListener("click", exportImportErrors);
   els.autoIssueBtn?.addEventListener("click", createIssuesFromDelayedTasks);
+  els.applyDataFixBtn?.addEventListener("click", applyDataFixSuggestions);
+  els.approveImportsBtn?.addEventListener("click", approvePendingImports);
   els.exportBackupBtn?.addEventListener("click", exportDataBackup);
   els.backupInput?.addEventListener("change", importDataBackup);
+  els.officeModeBtn?.addEventListener("click", toggleOfficeMode);
+  els.projectAdminForm?.addEventListener("submit", saveProjectFromForm);
+  els.cancelProjectEditBtn?.addEventListener("click", resetProjectForm);
 
   [
     els.taskSearchInput,
@@ -83,7 +89,15 @@ function bindEvents() {
   els.taskFilterResetBtn?.addEventListener("click", () => {
     Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
     renderTasks();
+    persistUiPreferences();
   });
+  els.selectAllTasks?.addEventListener("change", toggleSelectPageTasks);
+  els.bulkTaskToolbar?.querySelectorAll("[data-bulk-progress]").forEach((button) => {
+    button.addEventListener("click", () => bulkSetTaskProgress(Number(button.dataset.bulkProgress)));
+  });
+  els.bulkIssueBtn?.addEventListener("click", bulkCreateIssues);
+  els.bulkExportBtn?.addEventListener("click", bulkExportTasks);
+  els.bulkDeleteBtn?.addEventListener("click", bulkDeleteTasks);
 
   [
     els.modelBuildingFilter,
@@ -155,6 +169,7 @@ function bindEvents() {
     saveState();
     render();
     renderImportPreview(null);
+    showToast("已切换项目");
   });
 
   document.querySelector("#resetDemoBtn").addEventListener("click", () => {
@@ -169,11 +184,13 @@ function bindEvents() {
     saveState();
     render();
     renderImportPreview(null);
+    showToast("示例数据已恢复");
   });
 
   els.taskForm?.addEventListener("submit", saveTaskFromForm);
   els.cancelTaskEditBtn?.addEventListener("click", resetTaskForm);
   els.issueForm?.addEventListener("submit", saveIssueFromForm);
+  els.exportNoticeBtn?.addEventListener("click", exportRectificationNotice);
   els.cancelIssueEditBtn?.addEventListener("click", resetIssueForm);
 
 }
@@ -181,8 +198,11 @@ function bindEvents() {
 function render() {
   if (els.roleSelect) els.roleSelect.value = currentRole();
   if (els.globalSearchInput && els.globalSearchInput.value !== globalSearchQuery) els.globalSearchInput.value = globalSearchQuery;
+  document.body.classList.toggle("office-mode", Boolean(state.uiPreferences?.officeMode));
+  if (els.officeModeBtn) els.officeModeBtn.textContent = state.uiPreferences?.officeMode ? "大屏模式" : "办公模式";
   applyRoleAccess();
   renderProjectFilter();
+  renderProjectAdmin();
   renderContractorUnitSelect();
   renderDashboard();
   renderTasks();
@@ -194,6 +214,120 @@ function render() {
   renderRestorePointPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
+}
+
+function persistUiPreferences() {
+  state.uiPreferences = state.uiPreferences || {};
+  state.uiPreferences.taskFilters = { ...taskFilters };
+  state.uiPreferences.activeView = document.querySelector(".nav-item.active")?.dataset.view || "dashboard";
+  saveState();
+}
+
+function restoreUiPreferences() {
+  if (state.uiPreferences?.taskFilters) Object.assign(taskFilters, state.uiPreferences.taskFilters);
+  if (state.uiPreferences?.officeMode) document.body.classList.add("office-mode");
+}
+
+function toggleOfficeMode() {
+  state.uiPreferences.officeMode = !state.uiPreferences.officeMode;
+  recordAudit("切换显示模式", state.uiPreferences.officeMode ? "办公模式" : "大屏模式");
+  saveState();
+  render();
+  showToast(state.uiPreferences.officeMode ? "已切换到办公模式" : "已切换到大屏模式");
+}
+
+function renderProjectAdmin() {
+  if (!els.projectAdminList) return;
+  const archived = new Set(state.archivedProjectIds || []);
+  if (els.projectCopyFromSelect) {
+    els.projectCopyFromSelect.innerHTML = [
+      `<option value="">不复制范围</option>`,
+      ...state.projects.map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
+    ].join("");
+  }
+  if (els.projectAdminSummary) {
+    els.projectAdminSummary.textContent = `${state.projects.length - archived.size} 个启用｜${archived.size} 个归档`;
+  }
+  els.projectAdminList.innerHTML = state.projects.map((project) => `
+    <article class="${archived.has(project.id) ? "archived" : ""}">
+      <div>
+        <strong>${escapeHtml(project.name)}</strong>
+        <small>${project.id === state.selectedProjectId ? "当前项目" : archived.has(project.id) ? "已归档" : "可切换"}</small>
+      </div>
+      <div class="project-actions">
+        <button type="button" data-select-project="${project.id}">切换</button>
+        <button type="button" data-edit-project="${project.id}">编辑</button>
+        <button type="button" data-toggle-archive-project="${project.id}">${archived.has(project.id) ? "启用" : "归档"}</button>
+      </div>
+    </article>
+  `).join("");
+  els.projectAdminList.querySelectorAll("[data-select-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedProjectId = button.dataset.selectProject;
+      saveState();
+      render();
+      showToast("项目已切换");
+    });
+  });
+  els.projectAdminList.querySelectorAll("[data-edit-project]").forEach((button) => {
+    button.addEventListener("click", () => editProject(button.dataset.editProject));
+  });
+  els.projectAdminList.querySelectorAll("[data-toggle-archive-project]").forEach((button) => {
+    button.addEventListener("click", () => toggleProjectArchive(button.dataset.toggleArchiveProject));
+  });
+}
+
+function saveProjectFromForm(event) {
+  event.preventDefault();
+  if (!ensureCanEdit("保存项目")) return;
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  const name = String(data.name || "").trim();
+  if (!name) return;
+  const existing = data.id ? state.projects.find((project) => project.id === data.id) : null;
+  if (existing) {
+    existing.name = name;
+    recordAudit("编辑项目", name);
+  } else {
+    const project = { id: `p-${Date.now()}`, name };
+    state.projects.push(project);
+    state.projectScopes[project.id] = data.copyFrom && state.projectScopes[data.copyFrom]
+      ? cloneData(state.projectScopes[data.copyFrom])
+      : { basement: "", buildings: [], units: [] };
+    state.selectedProjectId = project.id;
+    recordAudit("新增项目", name);
+  }
+  resetProjectForm();
+  saveState();
+  render();
+  showToast("项目已保存");
+}
+
+function editProject(projectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project || !els.projectAdminForm) return;
+  els.projectAdminForm.elements.id.value = project.id;
+  els.projectAdminForm.elements.name.value = project.name;
+  if (els.projectSubmitBtn) els.projectSubmitBtn.textContent = "保存项目";
+  els.cancelProjectEditBtn?.classList.add("show");
+}
+
+function resetProjectForm() {
+  els.projectAdminForm?.reset();
+  if (els.projectAdminForm?.elements.id) els.projectAdminForm.elements.id.value = "";
+  if (els.projectSubmitBtn) els.projectSubmitBtn.textContent = "新增项目";
+  els.cancelProjectEditBtn?.classList.remove("show");
+}
+
+function toggleProjectArchive(projectId) {
+  state.archivedProjectIds = state.archivedProjectIds || [];
+  const archived = new Set(state.archivedProjectIds);
+  if (archived.has(projectId)) archived.delete(projectId);
+  else archived.add(projectId);
+  state.archivedProjectIds = [...archived];
+  recordAudit("切换项目归档", projectId);
+  saveState();
+  render();
 }
 
 function renderContractorUnitSelect() {
@@ -215,7 +349,9 @@ window.addEventListener("resize", () => {
   if (modelState?.isCanvasModel) scheduleCanvasModelDraw();
 });
 
+restoreUiPreferences();
 bindEvents();
 setDefaultDates();
 render();
+if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
 

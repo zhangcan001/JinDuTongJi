@@ -11,6 +11,12 @@
   document.querySelectorAll(".view").forEach((panel) => panel.classList.remove("active"));
   document.querySelector(`#${view}View`).classList.add("active");
   els.pageTitle.textContent = titles[view];
+  if (state?.uiPreferences) {
+    state.uiPreferences.activeView = view;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {}
+  }
 
   if (view === "scope") {
     requestAnimationFrame(() => {
@@ -25,7 +31,9 @@
 }
 
 function renderProjectFilter() {
+  const archived = new Set(state.archivedProjectIds || []);
   els.projectFilter.innerHTML = state.projects
+    .filter((project) => !archived.has(project.id) || project.id === state.selectedProjectId)
     .map((project) => `<option value="${project.id}">${project.name}</option>`)
     .join("");
   els.projectFilter.value = state.selectedProjectId;
@@ -68,6 +76,9 @@ function renderDashboard() {
   els.dueSoonCount.textContent = dueSoon;
   els.openIssueCount.textContent = openIssues;
   renderCommandScreen(tasks, issues, { overall, delayed, dueSoon, openIssues });
+  renderDashboardConfig();
+  applyDashboardConfig();
+  renderTodayTodo(tasks, issues);
 
   const warnings = [
     ...tasks
@@ -104,6 +115,38 @@ function renderDashboard() {
   renderAnalyticsPanel(tasks, issues);
 }
 
+function renderDashboardConfig() {
+  if (!els.dashboardConfig) return;
+  const cards = state.uiPreferences.dashboardCards || [];
+  const options = [
+    ["today", "今日待办"],
+    ["ops", "偏差/穿插/排名"],
+    ["weekly", "监理周报"],
+    ["chart", "曲线与预警"],
+    ["analytics", "多维分析"]
+  ];
+  els.dashboardConfig.innerHTML = options.map(([value, label]) => `
+    <label><input type="checkbox" value="${value}" ${cards.includes(value) ? "checked" : ""}> ${label}</label>
+  `).join("");
+  els.dashboardConfig.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("change", () => {
+      state.uiPreferences.dashboardCards = [...els.dashboardConfig.querySelectorAll("input:checked")].map((item) => item.value);
+      saveState();
+      applyDashboardConfig();
+      showToast("驾驶舱配置已保存");
+    });
+  });
+}
+
+function applyDashboardConfig() {
+  const cards = new Set(state.uiPreferences.dashboardCards || []);
+  document.querySelector(".today-panel")?.classList.toggle("hidden-panel", !cards.has("today"));
+  document.querySelector(".ops-grid")?.classList.toggle("hidden-panel", !cards.has("ops"));
+  document.querySelector(".weekly-panel")?.classList.toggle("hidden-panel", !cards.has("weekly"));
+  document.querySelector(".content-grid")?.classList.toggle("hidden-panel", !cards.has("chart"));
+  document.querySelector(".analytics-panel")?.classList.toggle("hidden-panel", !cards.has("analytics"));
+}
+
 function renderOperationsDashboard(tasks) {
   renderDeviationPanel(tasks);
   renderDependencyPanel(tasks);
@@ -111,6 +154,58 @@ function renderOperationsDashboard(tasks) {
   if (els.weeklyReportOutput && !els.weeklyReportOutput.value) {
     els.weeklyReportOutput.value = generateWeeklyReport();
   }
+}
+
+function renderTodayTodo(tasks, issues) {
+  if (!els.todayTodoList) return;
+  const taskItems = tasks
+    .map((task) => ({ task, status: getTaskStatus(task), days: daysBetween(task.planned) }))
+    .filter((item) => item.status.className === "delay" || item.status.className === "risk")
+    .map((item) => ({
+      id: item.task.id,
+      kind: "节点",
+      title: item.task.system || item.task.name,
+      meta: `${item.task.building || "-"}｜${item.task.floor || "-"}｜${item.task.owner || "-"}｜计划 ${item.task.planned}`,
+      level: item.status.className,
+      sort: item.status.className === "delay" ? item.days : 10 + item.days,
+      action: "查看台账"
+    }));
+  const issueItems = issues
+    .filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合")
+    .map((issue) => ({
+      id: issue.id,
+      kind: normalizeIssueStatus(issue.status),
+      title: issue.title,
+      meta: `${issue.owner || "-"}｜要求 ${issue.deadline || "-"}｜${issue.reviewResult || issue.delayReason || "待跟踪"}`,
+      level: issue.severity === "紧急" ? "delay" : normalizeIssueStatus(issue.status) === "待复验" ? "risk" : "normal",
+      sort: issue.severity === "紧急" ? -10 : daysBetween(issue.deadline || localDateText(today)),
+      action: "处理整改"
+    }));
+  const items = [...taskItems, ...issueItems].sort((a, b) => a.sort - b.sort).slice(0, 10);
+  els.todaySummary.textContent = items.length ? `${items.length} 项待处理` : "暂无待办";
+  els.todayTodoList.innerHTML = items.length
+    ? items.map((item) => `
+      <article class="today-item ${item.level}">
+        <span>${escapeHtml(item.kind)}</span>
+        <div>
+          <strong>${escapeHtml(item.title)}</strong>
+          <small>${escapeHtml(item.meta)}</small>
+        </div>
+        <button type="button" data-open-todo="${item.id}" data-todo-kind="${item.kind === "节点" ? "task" : "issue"}">${item.action}</button>
+      </article>
+    `).join("")
+    : `<article class="today-item"><span>平稳</span><div><strong>暂无今日待办</strong><small>当前没有滞后、临期或未闭合整改项。</small></div></article>`;
+  els.todayTodoList.querySelectorAll("[data-open-todo]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.dataset.todoKind === "task") {
+        switchView("schedule");
+        editTask(button.dataset.openTodo);
+      } else {
+        switchView("issues");
+        editIssue(button.dataset.openTodo);
+      }
+    });
+  });
 }
 
 function renderDeviationPanel(tasks) {
@@ -267,6 +362,11 @@ function generateWeeklyReport() {
   const openIssues = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合");
   const overall = tasks.length ? averageProgress(tasks) : 0;
   const dependencyRisks = buildDependencyRisks(tasks);
+  const issueCloseRate = issues.length ? Math.round(((issues.length - openIssues.length) / issues.length) * 100) : 100;
+  const nextWeek = tasks
+    .filter((task) => getTaskStatus(task).className !== "done")
+    .sort((a, b) => String(a.planned || "").localeCompare(String(b.planned || "")))
+    .slice(0, 8);
 
   if (els.weeklySummary) {
     els.weeklySummary.textContent = `${done.length} 完成｜${delayed.length} 滞后｜${openIssues.length} 整改`;
@@ -277,6 +377,7 @@ function generateWeeklyReport() {
     `统计日期：${localDateText(today)}`,
     "",
     `一、本周总体进度：综合完成率 ${overall}%，已完成节点 ${done.length} 项，临期节点 ${dueSoon.length} 项，滞后节点 ${delayed.length} 项。`,
+    `整改闭合率：${issueCloseRate}%，未闭合整改 ${openIssues.length} 项。`,
     "",
     "二、本周完成情况：",
     ...(done.slice(0, 8).map((task) => `- ${task.building || "-"} ${task.floor || "-"} ${task.system || task.name}，责任单位：${task.owner || "-"}`) || ["- 暂无完成项"]),
@@ -287,10 +388,16 @@ function generateWeeklyReport() {
     "四、穿插影响：",
     ...(dependencyRisks.slice(0, 6).map((risk) => `- ${risk.location}：${risk.message}`) || ["- 暂未发现关键穿插阻塞"]),
     "",
-    "五、监理要求：",
+    "五、整改闭环：",
+    ...(openIssues.slice(0, 6).map((issue) => `- ${issue.owner}：${issue.title}，状态 ${normalizeIssueStatus(issue.status)}，要求 ${issue.deadline || "-"} 前闭合。${issue.delayReason ? `延期原因：${issue.delayReason}。` : ""}`) || ["- 当前无未闭合整改项"]),
+    "",
+    "六、监理要求：",
     ...(openIssues.slice(0, 6).map((issue) => `- ${issue.owner}：${issue.action}`) || ["- 继续保持巡检和节点同步"]),
     "",
-    "六、下周重点：优先复核滞后节点赶工资源、临期节点完成情况和整改闭合状态。"
+    "七、下周计划：",
+    ...(nextWeek.map((task) => `- ${task.building || "-"} ${task.floor || "-"} ${task.system || task.name}，计划 ${task.planned}，责任单位：${task.owner || "-"}`) || ["- 结合现场进展滚动更新下周计划。"]),
+    "",
+    "八、监理建议：优先复核滞后节点赶工资源、临期节点完成情况和整改闭合状态。"
   ].join("\n");
 }
 
