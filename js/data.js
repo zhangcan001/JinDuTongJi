@@ -20,6 +20,10 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
 const demoState = {
   projects: [
     { id: "p1", name: "城东综合体一期" },

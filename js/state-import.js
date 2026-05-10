@@ -29,15 +29,67 @@ function importScopeForRow(normalized) {
 }
 
 function currentProjectItems(key) {
-  const cacheKey = `${key}:${state.selectedProjectId}`;
+  const cacheKey = `${key}:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}`;
   if (!stateCache.projectItems.has(cacheKey)) {
-    stateCache.projectItems.set(cacheKey, state[key].filter((item) => item.projectId === state.selectedProjectId));
+    const items = state[key].filter((item) => item.projectId === state.selectedProjectId);
+    stateCache.projectItems.set(cacheKey, items);
   }
   const items = stateCache.projectItems.get(cacheKey);
   if (currentRole() === "contractor" && state.selectedContractorUnit && state.selectedContractorUnit !== "all") {
     return items.filter((item) => `${item.owner || ""}${item.discipline || ""}`.includes(state.selectedContractorUnit.replace("单位", "")));
   }
   return items;
+}
+
+function currentProjectIndex(key = "tasks") {
+  const cacheKey = `index:${key}:${state.selectedProjectId}`;
+  if (!stateCache.projectItems.has(cacheKey)) {
+    const index = new Map();
+    currentProjectItems(key).forEach((item) => {
+      index.set(item.id, item);
+    });
+    stateCache.projectItems.set(cacheKey, index);
+  }
+  return stateCache.projectItems.get(cacheKey);
+}
+
+function currentProjectFilteredTasks(tasks, filters = taskFilters) {
+  const cacheKey = [
+    "filtered",
+    state.selectedProjectId,
+    filters.query || "",
+    filters.status || "all",
+    filters.building || "all",
+    filters.owner || "all",
+    filters.sort || "plannedAsc"
+  ].join(":");
+  if (!stateCache.projectItems.has(cacheKey)) {
+    const query = String(filters.query || "").toLowerCase();
+    const filtered = tasks
+      .filter((task) => {
+        const status = getTaskStatus(task).className;
+        const building = resolveBuildingName(task.building || task.name);
+        const haystack = [
+          task.name,
+          task.note,
+          task.building,
+          task.floor,
+          task.system,
+          task.discipline,
+          task.owner,
+          task.planned,
+          task.actual
+        ].join(" ").toLowerCase();
+        if (query && !haystack.includes(query)) return false;
+        if (filters.status !== "all" && status !== filters.status) return false;
+        if (filters.building !== "all" && building !== filters.building) return false;
+        if (filters.owner !== "all" && (task.owner || task.discipline || "未填单位") !== filters.owner) return false;
+        return true;
+      })
+      .sort(compareTasksByFilter);
+    stateCache.projectItems.set(cacheKey, filtered);
+  }
+  return stateCache.projectItems.get(cacheKey);
 }
 
 function currentProjectScope() {
@@ -296,7 +348,7 @@ function renderImportVersionPanel() {
             <strong>${escapeHtml(item.fileName)}</strong>
             <small>${new Date(item.time).toLocaleString()}｜新增 ${item.created}｜更新 ${item.updated}｜跳过 ${item.skipped || 0}</small>
           </div>
-          <button type="button" data-restore-import-version="${item.id}">恢复</button>
+          <button type="button" data-restore-import-version="${escapeAttr(item.id)}">恢复</button>
         </article>
       `).join("") : `<article><div><strong>暂无导入版本</strong><small>每次确认导入后会保存最近 10 次版本。</small></div></article>`}
     </div>
@@ -332,7 +384,7 @@ function renderWeightPanel() {
       ${units.length ? units.map((unit) => `
         <label>
           ${escapeHtml(unit.name)}
-          <input type="number" min="0" max="100" step="0.5" value="${Number(weights[unit.name] ?? 1)}" data-weight-unit="${escapeHtml(unit.name)}" />
+          <input type="number" min="0" max="100" step="0.5" value="${Number(weights[unit.name] ?? 1)}" data-weight-unit="${escapeAttr(unit.name)}" />
         </label>
       `).join("") : "<span>暂无专业单位</span>"}
     </div>
@@ -445,4 +497,3 @@ function buildDataHealthReport() {
     sections
   };
 }
-

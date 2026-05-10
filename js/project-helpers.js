@@ -39,7 +39,7 @@ function parseBuilding(value) {
 function normalizedBuildingKey(task) {
   const text = String(task.building || "");
   if (text.includes("地下")) return "地下室";
-  const scopes = typeof state !== "undefined" ? state.projectScopes : demoState.projectScopes;
+  const scopes = globalThis.state?.projectScopes || demoState.projectScopes;
   const scope = scopes?.[task.projectId] || { buildings: [] };
   return scope.buildings.find((building) => text.includes(building.name))?.name
     || text.replace(/（.*?）|\(.*?\)/g, "").trim();

@@ -1,9 +1,18 @@
+const MAX_IMPORT_FILE_BYTES = 8 * 1024 * 1024;
+const MAX_IMPORT_ROWS = 10000;
+
 async function importProgressExcel(event) {
   const file = event.target.files[0];
   if (!file) return;
 
+  if (isImportFileTooLarge(file)) {
+    els.importResult.textContent = "导入文件超过 8MB，建议按施工单位或楼栋拆分后再导入。";
+    event.target.value = "";
+    return;
+  }
+
   if (!window.XLSX) {
-    els.importResult.textContent = "Excel 解析库未加载成功，请确认当前网络可访问 jsdelivr 后重试。";
+    els.importResult.textContent = "Excel 解析库未加载成功，请确认本地 js/vendor/xlsx.full.min.js 文件存在并已正确加载。";
     event.target.value = "";
     return;
   }
@@ -12,6 +21,9 @@ async function importProgressExcel(event) {
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
     const rows = readWorkbookRows(workbook);
+    if (rows.length > MAX_IMPORT_ROWS) {
+      throw new Error(`本次文件包含 ${rows.length} 行，超过 ${MAX_IMPORT_ROWS} 行上限，请拆分后导入`);
+    }
     const validation = validateImportRows(rows);
     const preview = previewImportedRows(validation.validRows);
     pendingImport = { fileName: file.name, rows, validation, preview };
@@ -23,6 +35,10 @@ async function importProgressExcel(event) {
   } finally {
     event.target.value = "";
   }
+}
+
+function isImportFileTooLarge(file) {
+  return Number(file?.size || 0) > MAX_IMPORT_FILE_BYTES;
 }
 
 function validateImportRows(rows) {
@@ -891,4 +907,3 @@ function approvePendingImports() {
   render();
   showToast(`待复核已确认：新增 ${created}，更新 ${updated}`);
 }
-

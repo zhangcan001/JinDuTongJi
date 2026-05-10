@@ -1,7 +1,7 @@
 ﻿function renderTasks() {
   const tasks = currentProjectItems("tasks");
   syncTaskFilterControls(tasks);
-  const filteredTasks = filterTasks(tasks);
+  const filteredTasks = currentProjectFilteredTasks(tasks);
   const totalPages = Math.max(1, Math.ceil(filteredTasks.length / taskFilters.pageSize));
   taskFilters.page = Math.min(Math.max(1, taskFilters.page), totalPages);
   const pageStart = (taskFilters.page - 1) * taskFilters.pageSize;
@@ -17,19 +17,19 @@
           const status = getTaskStatus(task);
           return `
             <tr>
-              <td><input type="checkbox" data-select-task="${task.id}" ${selectedTaskIds.has(task.id) ? "checked" : ""}></td>
+              <td><input type="checkbox" data-select-task="${escapeAttr(task.id)}" ${selectedTaskIds.has(task.id) ? "checked" : ""}></td>
               <td><strong>${escapeHtml(task.name)}</strong><br><small>${escapeHtml(task.note || "")}</small></td>
-              <td><button class="text-action" type="button" data-locate-task="${task.id}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
+              <td><button class="text-action" type="button" data-locate-task="${escapeAttr(task.id)}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
               <td>${escapeHtml(task.discipline)}</td>
               <td>${escapeHtml(task.owner)}</td>
               <td>${task.planned}</td>
               <td>${task.actual || "-"}</td>
-              <td>${task.progress}%<br><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${task.id}">0%</button><button data-quick-progress="50" data-task-id="${task.id}">50%</button><button data-quick-progress="100" data-task-id="${task.id}">100%</button></div></td>
+              <td>${task.progress}%<br><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${escapeAttr(task.id)}">0%</button><button data-quick-progress="50" data-task-id="${escapeAttr(task.id)}">50%</button><button data-quick-progress="100" data-task-id="${escapeAttr(task.id)}">100%</button></div></td>
               <td><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
               <td>
                 <div class="row-actions">
-                  <button class="icon-btn" title="编辑节点" data-edit-task="${task.id}">✎</button>
-                  <button class="icon-btn" title="删除节点" data-delete-task="${task.id}">×</button>
+                  <button class="icon-btn" title="编辑节点" data-edit-task="${escapeAttr(task.id)}">✎</button>
+                  <button class="icon-btn" title="删除节点" data-delete-task="${escapeAttr(task.id)}">×</button>
                 </div>
               </td>
             </tr>
@@ -348,32 +348,6 @@ function uniqueSorted(values) {
   return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
-function filterTasks(tasks) {
-  const query = taskFilters.query.toLowerCase();
-  return tasks
-    .filter((task) => {
-      const status = getTaskStatus(task).className;
-      const building = resolveBuildingName(task.building || task.name);
-      const haystack = [
-        task.name,
-        task.note,
-        task.building,
-        task.floor,
-        task.system,
-        task.discipline,
-        task.owner,
-        task.planned,
-        task.actual
-      ].join(" ").toLowerCase();
-      if (query && !haystack.includes(query)) return false;
-      if (taskFilters.status !== "all" && status !== taskFilters.status) return false;
-      if (taskFilters.building !== "all" && building !== taskFilters.building) return false;
-      if (taskFilters.owner !== "all" && (task.owner || task.discipline || "未填单位") !== taskFilters.owner) return false;
-      return true;
-    })
-    .sort(compareTasksByFilter);
-}
-
 function compareTasksByFilter(a, b) {
   if (taskFilters.sort === "plannedDesc") return String(b.planned || "").localeCompare(String(a.planned || ""));
   if (taskFilters.sort === "progressAsc") return Number(a.progress || 0) - Number(b.progress || 0);
@@ -382,6 +356,7 @@ function compareTasksByFilter(a, b) {
 }
 function renderIssues() {
   const issues = filterIssues(currentProjectItems("issues"));
+  const taskIndex = currentProjectIndex("tasks");
   renderIssueTaskOptions();
   const columns = ["未整改", "整改中", "待复验", "已闭合"];
   els.issueBoard.innerHTML = columns.map((statusName) => {
@@ -390,7 +365,7 @@ function renderIssues() {
       <section class="issue-column ${statusClassForIssue(statusName)}">
         <h3>${statusName}<span>${statusIssues.length}</span></h3>
         ${statusIssues.length ? statusIssues.map((issue) => {
-            const linkedTask = issue.taskId ? state.tasks.find((task) => task.id === issue.taskId) : null;
+            const linkedTask = issue.taskId ? taskIndex.get(issue.taskId) : null;
             return `
             <article class="issue-card ${statusClassForIssue(issue.status)}">
               <span class="severity ${issue.severity === "紧急" ? "urgent" : issue.severity === "重要" ? "important" : "normal"}">${issue.severity}</span>
@@ -407,9 +382,9 @@ function renderIssues() {
               </div>
               <div class="issue-flow">${issueFlowHtml(issue.status)}</div>
               <div class="issue-actions">
-                <button data-advance-issue="${issue.id}" type="button">${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"}</button>
-                <button data-edit-issue="${issue.id}" type="button">编辑</button>
-                <button data-delete-issue="${issue.id}" type="button">删除</button>
+                <button data-advance-issue="${escapeAttr(issue.id)}" type="button">${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"}</button>
+                <button data-edit-issue="${escapeAttr(issue.id)}" type="button">编辑</button>
+                <button data-delete-issue="${escapeAttr(issue.id)}" type="button">删除</button>
               </div>
             </article>
           `;
@@ -580,10 +555,11 @@ function statusClassForIssue(status) {
 
 function drawChart(tasks) {
   const ctx = els.chart.getContext("2d");
-  const width = els.chart.width = els.chart.clientWidth * window.devicePixelRatio;
-  const height = els.chart.height = 220 * window.devicePixelRatio;
-  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-  ctx.clearRect(0, 0, width, height);
+  const ratio = window.devicePixelRatio || 1;
+  const width = els.chart.width = els.chart.clientWidth * ratio;
+  const height = els.chart.height = 220 * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, els.chart.clientWidth, 220);
 
   const chartWidth = els.chart.clientWidth;
   const points = tasks.length

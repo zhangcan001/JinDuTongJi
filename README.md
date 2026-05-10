@@ -76,7 +76,7 @@ http://127.0.0.1:4173/
 
 ## 本地检查
 
-项目包含一组轻量业务规则测试，用于覆盖进度状态、整改流转、延期原因分类和 CSV 转义：
+项目包含轻量 Node 测试，用于覆盖进度状态、整改流转、延期原因分类、CSV 转义、导入校验、状态迁移、权限过滤和 IndexedDB 镜像行为：
 
 ```powershell
 npm test
@@ -127,4 +127,12 @@ https://zhangcan001.github.io/JinDuTongJi/
 - `js/main.js`：事件绑定、全局渲染入口和页面初始化。
 - `js/vendor/xlsx.full.min.js`：本地 Excel 解析依赖，避免运行时依赖外部 CDN。
 
-数据默认保存在浏览器 `localStorage` 中，点击“恢复示例”可恢复演示数据。
+## 维护说明
+
+- 数据仍以浏览器 `localStorage` 为首屏启动来源，并会延迟镜像到 IndexedDB 的 `JinDuTongJiDB/snapshots/latest`。如果 `localStorage` 缺失，页面启动后会尝试从 IndexedDB 最新快照恢复。
+- `js/vendor/xlsx.full.min.js` 是本地 Excel 解析依赖；升级时请替换该文件并完成 `npm test` 和一次浏览器导入预览验证。
+- Excel 导入单文件限制为 8MB，解析后最多 10000 行；超过限制建议按施工单位或楼栋拆分导入。
+- 大文件后续拆分方向：`import-excel.js` 可按解析、校验、预览、应用导入、模板导出拆分；`scope-model.js` 可按范围维护、楼栋模型、楼层详情拆分。
+- 渲染后续优化方向：将当前全量 `render()` 调用逐步收敛为任务、范围、导入、配置等局部刷新函数。
+
+点击“恢复示例”可恢复演示数据。

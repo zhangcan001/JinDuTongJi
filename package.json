@@ -1,6 +1,9 @@
 {
   "scripts": {
-    "test": "node tests/business-rules.test.js"
+    "test": "node tests/business-rules.test.js && node tests/core-flows.test.js",
+    "test:ui": "node tests/ui-smoke.test.js"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
 }

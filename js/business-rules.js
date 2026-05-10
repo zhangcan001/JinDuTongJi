@@ -16,7 +16,9 @@
   function daysBetween(dateText, baseDate = new Date()) {
     if (!dateText) return 0;
     const target = new Date(`${dateText}T00:00:00`);
-    const startOfBase = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    const base = baseDate instanceof Date ? baseDate : new Date(baseDate);
+    const safeBase = Number.isNaN(base.getTime()) ? new Date() : base;
+    const startOfBase = new Date(safeBase.getFullYear(), safeBase.getMonth(), safeBase.getDate());
     return Math.ceil((target - startOfBase) / 86400000);
   }
 

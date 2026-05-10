@@ -1,9 +1,13 @@
+let loadedStateFromLocalStorage = false;
+
 function loadState() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
+    loadedStateFromLocalStorage = Boolean(saved);
     const parsed = saved ? JSON.parse(saved) : cloneData(demoState);
     return migrateState(parsed);
   } catch {
+    loadedStateFromLocalStorage = false;
     localStorage.removeItem(STORAGE_KEY);
     return migrateState(cloneData(demoState));
   }
@@ -13,7 +17,7 @@ function saveState() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     invalidateStateCache();
-    mirrorStateToIndexedDB();
+    scheduleStateMirrorToIndexedDB();
   } catch {
     notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
   }
@@ -34,23 +38,93 @@ function invalidateStateCache() {
   stateCache.projectItems = new Map();
 }
 
-function mirrorStateToIndexedDB() {
+const INDEXED_DB_NAME = "JinDuTongJiDB";
+const INDEXED_DB_VERSION = 1;
+let indexedDbConnectionPromise = null;
+let pendingIndexedDbMirrorTimer = null;
+let pendingIndexedDbSnapshot = null;
+
+function scheduleStateMirrorToIndexedDB() {
   if (!window.indexedDB) return;
-  const request = indexedDB.open("JinDuTongJiDB", 1);
-  request.onupgradeneeded = () => {
-    request.result.createObjectStore("snapshots", { keyPath: "id" });
+  pendingIndexedDbSnapshot = {
+    id: "latest",
+    savedAt: new Date().toISOString(),
+    state: cloneData(state)
   };
-  request.onsuccess = () => {
-    const db = request.result;
+  clearTimeout(pendingIndexedDbMirrorTimer);
+  pendingIndexedDbMirrorTimer = setTimeout(flushStateMirrorToIndexedDB, 300);
+}
+
+function openStateMirrorDB() {
+  if (indexedDbConnectionPromise) return indexedDbConnectionPromise;
+  indexedDbConnectionPromise = new Promise((resolve) => {
+    const request = indexedDB.open(INDEXED_DB_NAME, INDEXED_DB_VERSION);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("snapshots")) {
+        request.result.createObjectStore("snapshots", { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        indexedDbConnectionPromise = null;
+      };
+      resolve(db);
+    };
+    request.onerror = () => {
+      indexedDbConnectionPromise = null;
+      resolve(null);
+    };
+    request.onblocked = () => resolve(null);
+  });
+  return indexedDbConnectionPromise;
+}
+
+async function flushStateMirrorToIndexedDB() {
+  const snapshot = pendingIndexedDbSnapshot;
+  pendingIndexedDbMirrorTimer = null;
+  pendingIndexedDbSnapshot = null;
+  if (!snapshot || !window.indexedDB) return;
+  try {
+    const db = await openStateMirrorDB();
+    if (!db) return;
     const tx = db.transaction("snapshots", "readwrite");
-    tx.objectStore("snapshots").put({
-      id: "latest",
-      savedAt: new Date().toISOString(),
-      state: cloneData(state)
+    tx.objectStore("snapshots").put(snapshot);
+  } catch {
+    indexedDbConnectionPromise = null;
+  }
+}
+
+function mirrorStateToIndexedDB() {
+  scheduleStateMirrorToIndexedDB();
+}
+
+async function readLatestStateMirrorFromIndexedDB() {
+  if (!window.indexedDB) return null;
+  try {
+    const db = await openStateMirrorDB();
+    if (!db) return null;
+    return await new Promise((resolve) => {
+      const tx = db.transaction("snapshots", "readonly");
+      const request = tx.objectStore("snapshots").get("latest");
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+      tx.onerror = () => resolve(null);
     });
-    tx.oncomplete = () => db.close();
-    tx.onerror = () => db.close();
-  };
+  } catch {
+    indexedDbConnectionPromise = null;
+    return null;
+  }
+}
+
+async function hydrateStateFromIndexedDB() {
+  if (loadedStateFromLocalStorage) return false;
+  const snapshot = await readLatestStateMirrorFromIndexedDB();
+  if (!snapshot?.state || !Array.isArray(snapshot.state.projects) || !Array.isArray(snapshot.state.tasks)) return false;
+  state = migrateState(cloneData(snapshot.state));
+  saveState();
+  return true;
 }
 
 function recordAudit(action, detail = "") {
@@ -183,7 +257,7 @@ function renderRestorePointPanel() {
             <strong>${escapeHtml(point.reason)}</strong>
             <small>${new Date(point.createdAt).toLocaleString()}｜节点 ${point.taskCount}｜整改 ${point.issueCount}</small>
           </div>
-          <button type="button" data-restore-point="${point.id}">恢复</button>
+          <button type="button" data-restore-point="${escapeAttr(point.id)}">恢复</button>
         </article>
       `).join("") : `<article><div><strong>暂无恢复点</strong><small>导入、删除和恢复前会自动保存最近 5 次状态。</small></div></article>`}
     </div>

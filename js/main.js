@@ -242,7 +242,7 @@ function renderProjectAdmin() {
   if (els.projectCopyFromSelect) {
     els.projectCopyFromSelect.innerHTML = [
       `<option value="">不复制范围</option>`,
-      ...state.projects.map((project) => `<option value="${project.id}">${escapeHtml(project.name)}</option>`)
+      ...state.projects.map((project) => `<option value="${escapeAttr(project.id)}">${escapeHtml(project.name)}</option>`)
     ].join("");
   }
   if (els.projectAdminSummary) {
@@ -255,9 +255,9 @@ function renderProjectAdmin() {
         <small>${project.id === state.selectedProjectId ? "当前项目" : archived.has(project.id) ? "已归档" : "可切换"}</small>
       </div>
       <div class="project-actions">
-        <button type="button" data-select-project="${project.id}">切换</button>
-        <button type="button" data-edit-project="${project.id}">编辑</button>
-        <button type="button" data-toggle-archive-project="${project.id}">${archived.has(project.id) ? "启用" : "归档"}</button>
+        <button type="button" data-select-project="${escapeAttr(project.id)}">切换</button>
+        <button type="button" data-edit-project="${escapeAttr(project.id)}">编辑</button>
+        <button type="button" data-toggle-archive-project="${escapeAttr(project.id)}">${archived.has(project.id) ? "启用" : "归档"}</button>
       </div>
     </article>
   `).join("");
@@ -349,9 +349,30 @@ window.addEventListener("resize", () => {
   if (modelState?.isCanvasModel) scheduleCanvasModelDraw();
 });
 
+document.addEventListener("visibilitychange", () => {
+  if (!modelState?.isCanvasModel) return;
+  if (document.hidden && modelState.autoRotate) {
+    modelState.autoRotate = false;
+    updateAutoRotateButton();
+    showToast("页面失焦时已暂停自动旋转");
+    return;
+  }
+  if (!document.hidden && modelState.renderQuality === "rotating") {
+    modelState.renderQuality = "full";
+    scheduleCanvasModelDraw();
+  }
+});
+
 restoreUiPreferences();
 bindEvents();
 setDefaultDates();
 render();
 if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
+hydrateStateFromIndexedDB().then((restored) => {
+  if (!restored) return;
+  restoreUiPreferences();
+  render();
+  if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
+  showToast("已从 IndexedDB 恢复本地数据");
+});
 

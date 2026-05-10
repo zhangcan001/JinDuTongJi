@@ -191,7 +191,7 @@ function renderTodayTodo(tasks, issues) {
           <strong>${escapeHtml(item.title)}</strong>
           <small>${escapeHtml(item.meta)}</small>
         </div>
-        <button type="button" data-open-todo="${item.id}" data-todo-kind="${item.kind === "节点" ? "task" : "issue"}">${item.action}</button>
+        <button type="button" data-open-todo="${escapeAttr(item.id)}" data-todo-kind="${escapeAttr(item.kind === "节点" ? "task" : "issue")}">${escapeHtml(item.action)}</button>
       </article>
     `).join("")
     : `<article class="today-item"><span>平稳</span><div><strong>暂无今日待办</strong><small>当前没有滞后、临期或未闭合整改项。</small></div></article>`;

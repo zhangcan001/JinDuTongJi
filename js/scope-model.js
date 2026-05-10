@@ -2,6 +2,17 @@ function renderProjectScope() {
   const scope = currentProjectScope();
   const systemCount = scope.units.reduce((sum, unit) => sum + unit.systems.length, 0);
   const tasks = currentProjectItems("tasks");
+  const scopeCacheKey = `scope:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${tasks.length}:${scope.buildings.map((building) => `${building.name}:${building.floors}`).join("|")}:${scope.units.map((unit) => `${unit.name}:${unit.code}:${unit.systems.join(",")}`).join("|")}:${scope.basement || ""}`;
+  const cachedScope = stateCache.projectItems.get(scopeCacheKey);
+  const unitRows = currentScopeUnitRows(scope, tasks);
+  if (cachedScope?.scope === scope && cachedScope?.tasks === tasks) {
+    renderScopeMaintenance(scope);
+    renderBuildingModel(scope, tasks);
+    renderElevatorDashboard(tasks);
+    renderDictionaryPanel(scope);
+    renderBasementCutaway(scope, tasks);
+    return;
+  }
   els.scopeSummary.textContent = `${scope.buildings.length} 栋楼｜${scope.units.length} 个单位｜${systemCount} 项内容`;
   els.buildingGrid.innerHTML = [
     ...scope.buildings.map(
@@ -18,32 +29,27 @@ function renderProjectScope() {
   ].join("");
 
   els.scopeUnitGrid.innerHTML = scope.units
-    .map(
-      (unit) => {
-        const unitTasks = tasks.filter((task) => taskMatchesUnit(task, unit));
-        const progress = unitTasks.length
-          ? Math.round(unitTasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / unitTasks.length)
-          : 0;
-        const detailRows = buildUnitProgressRows(unitTasks);
+    .map((unit, index) => {
+        const row = unitRows[index] || { unit, unitTasks: [], progress: 0, detailRows: [] };
         return `
         <article class="unit-card">
           <div class="unit-card-header">
             <span>${escapeHtml(unit.code)}</span>
             <div>
               <strong>${escapeHtml(unit.name)}</strong>
-              <small>${unitTasks.length} 个进度节点｜完成率 ${progress}%</small>
+              <small>${row.unitTasks.length} 个进度节点｜完成率 ${row.progress}%</small>
             </div>
           </div>
           <div class="unit-progress">
-            <span style="width: ${progress}%"></span>
+            <span style="width: ${row.progress}%"></span>
           </div>
           <div class="system-list">
             ${unit.systems.map((system) => `<span>${escapeHtml(system)}</span>`).join("")}
           </div>
           <div class="floor-progress-list">
             ${
-              detailRows.length
-                ? detailRows
+              row.detailRows.length
+                ? row.detailRows
                     .map(
                       (row) => `
                         <div class="floor-progress-row">
@@ -59,8 +65,7 @@ function renderProjectScope() {
           </div>
         </article>
       `;
-      }
-    )
+    })
     .join("");
 
   renderScopeMaintenance(scope);
@@ -68,10 +73,18 @@ function renderProjectScope() {
   renderElevatorDashboard(tasks);
   renderDictionaryPanel(scope);
   renderBasementCutaway(scope, tasks);
+  stateCache.projectItems.set(scopeCacheKey, { scope, tasks });
 }
 
 function renderElevatorDashboard(tasks) {
   if (!els.elevatorGrid) return;
+  const cacheKey = `elevator:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${tasks.length}`;
+  const cached = stateCache.projectItems.get(cacheKey);
+  if (cached) {
+    if (els.elevatorSummary) els.elevatorSummary.textContent = cached.summary;
+    els.elevatorGrid.innerHTML = cached.html;
+    return;
+  }
   const elevatorTasks = tasks.filter((task) => `${task.owner || ""}${task.discipline || ""}${task.system || ""}`.includes("电梯"));
   const grouped = new Map();
   elevatorTasks.forEach((task) => {
@@ -88,7 +101,7 @@ function renderElevatorDashboard(tasks) {
   if (els.elevatorSummary) {
     els.elevatorSummary.textContent = `${rows.length} 栋楼｜${elevatorTasks.length} 个电梯节点`;
   }
-  els.elevatorGrid.innerHTML = rows.length
+  const html = rows.length
     ? rows.map((row) => `
       <article class="elevator-card">
         <strong>${escapeHtml(row.building)}</strong>
@@ -97,10 +110,19 @@ function renderElevatorDashboard(tasks) {
       </article>
     `).join("")
     : `<article class="elevator-card"><strong>暂无电梯数据</strong><small>导入电梯单位模板后显示。</small></article>`;
+  els.elevatorGrid.innerHTML = html;
+  stateCache.projectItems.set(cacheKey, { summary: els.elevatorSummary?.textContent || "", html });
 }
 
 function renderDictionaryPanel(scope) {
   if (!els.dictionaryGrid) return;
+  const cacheKey = `dictionary:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${scope.buildings.map((building) => `${building.name}:${building.floors}`).join("|")}:${scope.units.map((unit) => `${unit.name}:${unit.code}:${unit.systems.join(",")}`).join("|")}:${scope.basement || ""}`;
+  const cached = stateCache.projectItems.get(cacheKey);
+  if (cached) {
+    if (els.dictionarySummary) els.dictionarySummary.textContent = cached.summary;
+    els.dictionaryGrid.innerHTML = cached.html;
+    return;
+  }
   const systems = uniqueSorted(scope.units.flatMap((unit) => unit.systems));
   if (els.dictionarySummary) {
     els.dictionarySummary.textContent = `${scope.buildings.length} 栋楼｜${scope.units.length} 个单位｜${systems.length} 项内容`;
@@ -111,11 +133,13 @@ function renderDictionaryPanel(scope) {
       <div>${items.length ? items.map((item) => `<span>${escapeHtml(item)}</span>`).join("") : "<small>暂无数据</small>"}</div>
     </article>
   `;
-  els.dictionaryGrid.innerHTML = [
+  const html = [
     section("楼栋", scope.buildings.map((building) => `${building.name}（${building.floors}层）`)),
     section("单位", scope.units.map((unit) => unit.name)),
     section("施工内容", systems)
   ].join("");
+  els.dictionaryGrid.innerHTML = html;
+  stateCache.projectItems.set(cacheKey, { summary: els.dictionarySummary?.textContent || "", html });
 }
 
 function renderScopeMaintenance(scope) {
@@ -151,8 +175,8 @@ function renderScopeMaintenance(scope) {
             <small>${unit.systems.map(escapeHtml).join("、") || "暂无施工内容"}</small>
           </div>
           <div class="scope-item-actions">
-            <button type="button" data-edit-unit="${escapeHtml(unit.name)}">编辑</button>
-            <button type="button" data-delete-unit="${escapeHtml(unit.name)}">删除</button>
+            <button type="button" data-edit-unit="${escapeAttr(unit.name)}">编辑</button>
+            <button type="button" data-delete-unit="${escapeAttr(unit.name)}">删除</button>
           </div>
         </article>
       `).join("")
@@ -186,6 +210,21 @@ function renderScopeMaintenance(scope) {
   els.scopeMaintenanceList.querySelectorAll("[data-delete-unit]").forEach((button) => {
     button.addEventListener("click", () => deleteScopeUnit(button.dataset.deleteUnit));
   });
+}
+
+function currentScopeUnitRows(scope, tasks) {
+  const cacheKey = `scope-units:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${tasks.length}:${scope.units.map((unit) => `${unit.name}:${unit.code}:${unit.systems.join(",")}`).join("|")}`;
+  if (!stateCache.projectItems.has(cacheKey)) {
+    const rows = scope.units.map((unit) => {
+      const unitTasks = tasks.filter((task) => taskMatchesUnit(task, unit));
+      const progress = unitTasks.length
+        ? Math.round(unitTasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / unitTasks.length)
+        : 0;
+      return { unit, unitTasks, progress, detailRows: buildUnitProgressRows(unitTasks) };
+    });
+    stateCache.projectItems.set(cacheKey, rows);
+  }
+  return stateCache.projectItems.get(cacheKey);
 }
 
 function saveScopeBuilding(event) {
@@ -435,6 +474,13 @@ function buildUnitProgressRows(tasks) {
 
 function renderBasementCutaway(scope, tasks) {
   if (!els.basementCutaway) return;
+  const cacheKey = `basement:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${tasks.length}:${scope.basement || ""}`;
+  const cached = stateCache.projectItems.get(cacheKey);
+  if (cached) {
+    if (els.basementSummary) els.basementSummary.textContent = cached.summary;
+    els.basementCutaway.innerHTML = cached.html;
+    return;
+  }
   const basementTasks = tasks.filter((task) => `${task.building || ""}${task.floor || ""}${task.name || ""}`.includes("地下"));
   const grouped = new Map();
   basementTasks.forEach((task) => {
@@ -449,7 +495,7 @@ function renderBasementCutaway(scope, tasks) {
     count: systemTasks.length
   }));
   if (els.basementSummary) els.basementSummary.textContent = `${rows.length} 个系统｜${basementTasks.length} 个节点`;
-  els.basementCutaway.innerHTML = rows.length
+  const html = rows.length
     ? rows.map((row) => `
         <article class="basement-segment ${row.status}">
           <strong>${escapeHtml(row.system)}</strong>
@@ -458,6 +504,8 @@ function renderBasementCutaway(scope, tasks) {
         </article>
       `).join("")
     : `<article class="basement-segment"><strong>暂无地下室节点</strong><small>导入地下室楼层后显示剖面进度</small></article>`;
+  els.basementCutaway.innerHTML = html;
+  stateCache.projectItems.set(cacheKey, { summary: els.basementSummary?.textContent || "", html });
 }
 
 function statusLabel(status) {
@@ -493,9 +541,10 @@ function renderModelFloorPanel(selected) {
     return;
   }
 
-  const floorTasks = selected.related.filter((task) => taskMatchesFloor(task, selectedModelFloor, selected));
-  const progress = floorTasks.length ? averageProgress(floorTasks) : floorProgressValue(selected, selectedModelFloor);
-  const status = aggregateFloorStatus(floorTasks, progress);
+  const floorData = getModelFloorData(selected, selectedModelFloor);
+  const floorTasks = floorData.tasks;
+  const progress = floorTasks.length ? floorData.progress : floorProgressValue(selected, selectedModelFloor);
+  const status = floorTasks.length ? floorData.status : aggregateFloorStatus(floorTasks, progress);
   const rows = floorTasks
     .slice()
     .sort((a, b) => Number(a.progress || 0) - Number(b.progress || 0))
@@ -521,7 +570,7 @@ function renderModelFloorPanel(selected) {
     <div class="model-floor-actions">
       <button type="button" data-floor-nav="-1">上一层</button>
       <button type="button" data-floor-nav="1">下一层</button>
-      <button type="button" data-add-floor-task="${escapeHtml(selected.name)}">新增本层节点</button>
+      <button type="button" data-add-floor-task="${escapeAttr(selected.name)}">新增本层节点</button>
     </div>
     <div class="model-floor-panel-list">
       ${rows || "<article><strong>暂无明细节点</strong><span>可通过 Excel 导入楼层施工内容</span><small>导入后会在这里显示具体施工情况。</small></article>"}
@@ -578,7 +627,7 @@ function renderCssBuildingModel(buildingStats) {
                 class="tower ${building.isBasement ? "basement" : ""} ${building.name === selectedBuildingName ? "selected" : ""}"
                 type="button"
                 style="--tower-x:${index % 4}; --tower-y:${Math.floor(index / 4)};"
-                data-building-model="${escapeHtml(building.name)}"
+                data-building-model="${escapeAttr(building.name)}"
               >
                 <span class="tower-hit"></span>
                 <span class="tower-stack" style="--floors:${Math.max(1, building.floors)};">
@@ -660,11 +709,13 @@ function syncSelectOptions(select, options) {
 }
 
 function filterModelTasks(tasks) {
+  const cacheKey = `model:${state.selectedProjectId}:${els.modelBuildingFilter?.value || "all"}:${els.modelUnitFilter?.value || "all"}:${els.modelSystemFilter?.value || "all"}:${els.modelStatusFilter?.value || "all"}:${tasks.length}`;
+  if (stateCache.projectItems.has(cacheKey)) return stateCache.projectItems.get(cacheKey);
   const buildingFilter = els.modelBuildingFilter?.value || "all";
   const unitFilter = els.modelUnitFilter?.value || "all";
   const systemFilter = els.modelSystemFilter?.value || "all";
   const statusFilter = els.modelStatusFilter?.value || "all";
-  return tasks.filter((task) => {
+  const filtered = tasks.filter((task) => {
     const status = getTaskStatus(task).className;
     if (buildingFilter !== "all" && !taskMatchesModelBuildingName(task, buildingFilter)) return false;
     if (unitFilter !== "all" && !`${task.owner || ""}${task.discipline || ""}`.includes(unitFilter.replace("单位", ""))) return false;
@@ -673,6 +724,8 @@ function filterModelTasks(tasks) {
     if (statusFilter !== "all" && statusFilter !== "active" && status !== statusFilter) return false;
     return true;
   });
+  stateCache.projectItems.set(cacheKey, filtered);
+  return filtered;
 }
 
 function taskMatchesModelBuildingName(task, buildingName) {
@@ -771,15 +824,23 @@ function updateModelHover(event) {
 function runCanvasModelLoop() {
   if (!modelState?.isCanvasModel || modelState.animating) return;
   modelState.animating = true;
+  modelState.renderQuality = "rotating";
+  modelState.lastAutoRotateDrawAt = 0;
   const tick = () => {
     if (!modelState?.isCanvasModel) return;
     if (modelState.autoRotate && !modelState.dragging) {
+      const now = performance.now();
       modelState.angle += 0.004;
-      scheduleCanvasModelDraw();
+      if (!modelState.lastAutoRotateDrawAt || now - modelState.lastAutoRotateDrawAt >= 33) {
+        modelState.lastAutoRotateDrawAt = now;
+        scheduleCanvasModelDraw();
+      }
       requestAnimationFrame(tick);
       return;
     }
     modelState.animating = false;
+    modelState.renderQuality = "full";
+    scheduleCanvasModelDraw();
   };
   requestAnimationFrame(tick);
 }
@@ -809,6 +870,7 @@ function drawCanvasBuildingModel() {
   const canvas = els.buildingModel;
   const ctx = canvas.getContext("2d");
   const rect = canvas.getBoundingClientRect();
+  const reduced = modelState?.renderQuality === "rotating";
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const width = Math.max(1, Math.floor(rect.width));
   const height = Math.max(1, Math.floor(rect.height));
@@ -835,36 +897,41 @@ function drawCanvasBuildingModel() {
     .map((item) => ({ ...item, center: projectPoint(item.x, 0, item.z, width, height), depth: rotatePoint(item.x, item.z).z }))
     .sort((a, b) => a.depth - b.depth)
     .forEach((item) => {
-      const floorCount = Math.max(1, Math.min(item.floors, 12));
+      const floorDetails = item.floorDetails || [];
+      const floorCount = Math.max(1, Math.min(floorDetails.length || item.floors, 12));
       for (let floorIndex = 0; floorIndex < floorCount; floorIndex += 1) {
-        const progress = item.floorProgress[floorIndex] ?? item.progress;
+        const floorInfo = floorDetails[floorIndex] || {
+          label: item.isBasement ? "地下室" : `${floorIndex + 1}层`,
+          progress: item.floorProgress[floorIndex] ?? item.progress,
+          tasks: [],
+          status: "normal",
+          openCount: 0,
+          delayCount: 0
+        };
         const y = item.center.y - floorIndex * floorHeight;
         const box = makeIsoBox(item.center.x, y, blockWidth * (item.isBasement ? 1.7 : 1), blockDepth, floorHeight);
-        const floorLabel = item.isBasement ? "地下室" : `${floorIndex + 1}层`;
-        const floorTasks = item.related.filter((task) => taskMatchesFloor(task, floorLabel, item));
-        const floorStatus = aggregateFloorStatus(floorTasks, progress);
-        const isSelected = item.name === selectedBuildingName && (!selectedModelFloor || selectedModelFloor === floorLabel);
-        const isHovered = modelState.hoverItem?.name === item.name && modelState.hoverItem?.floorLabel === floorLabel;
-        const isImportFocus = lastImportFocus?.buildingName === item.name && lastImportFocus.floorLabel === floorLabel;
-        drawIsoBox(ctx, box, cssColorForProgress(progress), isSelected || isImportFocus || isHovered, floorStatus);
-        drawFloorHeatmap(ctx, box, floorTasks, progress);
+        const isSelected = item.name === selectedBuildingName && (!selectedModelFloor || selectedModelFloor === floorInfo.label);
+        const isHovered = modelState.hoverItem?.name === item.name && modelState.hoverItem?.floorLabel === floorInfo.label;
+        const isImportFocus = lastImportFocus?.buildingName === item.name && lastImportFocus.floorLabel === floorInfo.label;
+        drawIsoBox(ctx, box, cssColorForProgress(floorInfo.progress), isSelected || isImportFocus || isHovered, floorInfo.status, reduced);
+        if (!reduced) drawFloorHeatmap(ctx, box, floorInfo.tasks, floorInfo.progress);
         const hitItem = {
           name: item.name,
-          floorLabel,
-          progress,
+          floorLabel: floorInfo.label,
+          progress: floorInfo.progress,
           polygon: hitPolygonForBox(box),
-          status: floorStatus,
-          openCount: floorTasks.filter((task) => getTaskStatus(task).className !== "done").length,
-          delayCount: floorTasks.filter((task) => getTaskStatus(task).className === "delay").length
+          status: floorInfo.status,
+          openCount: floorInfo.openCount,
+          delayCount: floorInfo.delayCount
         };
         modelState.hitItems.unshift(hitItem);
-        if (isSelected) selectedBadge = { ...hitItem, x: item.center.x, y: y - floorHeight - blockDepth - 18 };
+        if (!reduced && isSelected) selectedBadge = { ...hitItem, x: item.center.x, y: y - floorHeight - blockDepth - 18 };
       }
-      drawModelLabel(ctx, item, item.center.x, item.center.y - floorCount * floorHeight - 26);
+      drawModelLabel(ctx, item, item.center.x, item.center.y - floorCount * floorHeight - 26, reduced);
     });
 
-  if (selectedBadge) drawSelectedFloorBadge(ctx, selectedBadge);
-  drawModelHint(ctx, width);
+  if (!reduced && selectedBadge) drawSelectedFloorBadge(ctx, selectedBadge);
+  if (!reduced) drawModelHint(ctx, width);
 }
 
 function getModelLayout(stats) {
@@ -952,14 +1019,14 @@ function makeIsoBox(cx, cy, w, d, h) {
   };
 }
 
-function drawIsoBox(ctx, box, color, selected, status = "normal") {
-  drawPolygon(ctx, box.left, shadeHex(color, -28), selected, status);
-  drawPolygon(ctx, box.right, shadeHex(color, -12), selected, status);
-  drawPolygon(ctx, box.front, shadeHex(color, -20), selected, status);
-  drawPolygon(ctx, box.top, color, selected, status);
+function drawIsoBox(ctx, box, color, selected, status = "normal", reduced = false) {
+  drawPolygon(ctx, box.left, shadeHex(color, -28), selected, status, reduced);
+  drawPolygon(ctx, box.right, shadeHex(color, -12), selected, status, reduced);
+  drawPolygon(ctx, box.front, shadeHex(color, -20), selected, status, reduced);
+  drawPolygon(ctx, box.top, color, selected, status, reduced);
 }
 
-function drawPolygon(ctx, points, color, selected, status = "normal") {
+function drawPolygon(ctx, points, color, selected, status = "normal", reduced = false) {
   const statusStroke = {
     delay: "rgba(255,92,108,0.95)",
     risk: "rgba(255,184,74,0.92)",
@@ -967,7 +1034,6 @@ function drawPolygon(ctx, points, color, selected, status = "normal") {
     active: "rgba(68,215,255,0.72)",
     normal: "rgba(234,248,255,0.2)"
   };
-  const pulse = status === "delay" ? 0.5 + Math.sin(Date.now() / 180) * 0.5 : 0;
   ctx.beginPath();
   points.forEach((point, index) => {
     if (index === 0) ctx.moveTo(point.x, point.y);
@@ -976,9 +1042,9 @@ function drawPolygon(ctx, points, color, selected, status = "normal") {
   ctx.closePath();
   ctx.fillStyle = color;
   ctx.strokeStyle = selected ? "rgba(255,255,255,0.95)" : statusStroke[status] || statusStroke.normal;
-  ctx.lineWidth = selected ? 2.6 : status === "delay" ? 1.7 : 1;
+  ctx.lineWidth = selected ? 2.6 : status === "delay" && !reduced ? 1.7 : reduced ? 0.8 : 1;
   ctx.shadowColor = selected ? "rgba(125,255,203,0.82)" : statusStroke[status] || color;
-  ctx.shadowBlur = selected ? 24 : status === "delay" ? 12 + pulse * 14 : 9;
+  ctx.shadowBlur = reduced ? 0 : selected ? 24 : status === "delay" ? 12 + (0.5 + Math.sin(Date.now() / 180) * 0.5) * 14 : 9;
   ctx.fill();
   ctx.stroke();
   ctx.shadowBlur = 0;
@@ -1029,21 +1095,21 @@ function drawSelectedFloorBadge(ctx, item) {
   ctx.restore();
 }
 
-function drawModelLabel(ctx, item, x, y) {
+function drawModelLabel(ctx, item, x, y, reduced = false) {
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const rect = avoidLabelOverlap(x - 40, y - 18, 80, 36);
+  const rect = reduced ? { x: x - 36, y: y - 15, width: 72, height: 30 } : avoidLabelOverlap(x - 40, y - 18, 80, 36);
   ctx.fillStyle = "rgba(3, 10, 18, 0.78)";
   roundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 7);
   ctx.fill();
   ctx.strokeStyle = item.name === selectedBuildingName ? "rgba(125,255,203,0.8)" : "rgba(139,235,255,0.28)";
   ctx.stroke();
   ctx.fillStyle = "#f4fcff";
-  ctx.font = "800 14px Microsoft YaHei, Arial";
+  ctx.font = reduced ? "800 12px Microsoft YaHei, Arial" : "800 14px Microsoft YaHei, Arial";
   ctx.fillText(item.name, rect.x + rect.width / 2, rect.y + 13);
   ctx.fillStyle = item.progress >= 100 ? "#7dffcb" : "#8ff5ff";
-  ctx.font = "800 12px Microsoft YaHei, Arial";
+  ctx.font = reduced ? "800 11px Microsoft YaHei, Arial" : "800 12px Microsoft YaHei, Arial";
   ctx.fillText(`${item.progress}%`, rect.x + rect.width / 2, rect.y + 29);
   ctx.restore();
 }
@@ -1135,12 +1201,27 @@ function getBuildingStats(scope, tasks) {
   }
 
   return buildings.map((building) => {
-    const related = tasks.filter((task) => taskMatchesBuilding(task, building));
-    const floorProgress = Array.from({ length: building.floors }, (_, index) => {
-      const floorTasks = related.filter((task) => parseFloorNumber(task.floor) === index + 1 || building.isBasement);
-      if (!floorTasks.length) return related.length ? averageProgress(related) : 0;
-      return averageProgress(floorTasks);
+    const related = [];
+    const floorBuckets = Array.from({ length: Math.max(1, building.floors) }, () => []);
+    tasks.forEach((task) => {
+      if (!taskMatchesBuilding(task, building)) return;
+      related.push(task);
+      const floorIndex = building.isBasement ? 0 : Math.max(0, parseFloorNumber(task.floor) - 1);
+      if (floorBuckets[floorIndex]) floorBuckets[floorIndex].push(task);
     });
+    const relatedProgress = related.length ? averageProgress(related) : 0;
+    const floorDetails = floorBuckets.map((floorTasks, floorIndex) => {
+      const progress = floorTasks.length ? averageProgress(floorTasks) : relatedProgress;
+      return {
+        label: building.isBasement ? "地下室" : `${floorIndex + 1}层`,
+        progress,
+        tasks: floorTasks,
+        status: aggregateFloorStatus(floorTasks, progress),
+        openCount: floorTasks.filter((task) => Number(task.progress || 0) < 100 && !task.actual).length,
+        delayCount: floorTasks.filter((task) => getTaskStatus(task).className === "delay").length
+      };
+    });
+    const floorProgress = floorDetails.map((floor) => floor.progress);
     const progress = related.length ? averageProgress(related) : 0;
     const completed = related
       .filter((task) => Number(task.progress || 0) >= 100 || task.actual)
@@ -1152,7 +1233,7 @@ function getBuildingStats(scope, tasks) {
       .map(taskDetailText)
       .slice(0, 8);
 
-    return { ...building, related, floorProgress, progress, completed, active };
+    return { ...building, related, floorProgress, floorDetails, progress, completed, active };
   });
 }
 
@@ -1176,9 +1257,8 @@ function selectBuildingFromModel(name) {
 }
 
 function renderScopedModelDetail(target) {
-  const scopedTasks = selectedModelFloor
-    ? target.related.filter((task) => taskMatchesFloor(task, selectedModelFloor, target))
-    : target.related;
+  const scopedFloor = selectedModelFloor ? getModelFloorData(target, selectedModelFloor) : null;
+  const scopedTasks = selectedModelFloor ? scopedFloor.tasks : target.related;
   const progress = scopedTasks.length
     ? averageProgress(scopedTasks)
     : selectedModelFloor
@@ -1219,7 +1299,7 @@ function renderScopedModelDetail(target) {
               <td>${escapeHtml(task.actual || "-")}</td>
               <td>
                 ${escapeHtml(task.note || "-")}
-                <br><button class="text-action" type="button" data-edit-task="${task.id}">编辑节点</button>
+                <br><button class="text-action" type="button" data-edit-task="${escapeAttr(task.id)}">编辑节点</button>
               </td>
             </tr>
           `;
@@ -1278,6 +1358,29 @@ function floorProgressValue(building, floorLabel) {
   if (building.isBasement || floorLabel === "地下室") return building.floorProgress[0] || building.progress || 0;
   const index = parseFloorNumber(floorLabel) - 1;
   return building.floorProgress[index] || 0;
+}
+
+function getModelFloorData(building, floorLabel) {
+  const floorDetails = building.floorDetails || [];
+  if (building.isBasement || floorLabel === "地下室") {
+    return floorDetails[0] || {
+      label: "地下室",
+      progress: building.floorProgress[0] || building.progress || 0,
+      tasks: building.related.filter((task) => taskMatchesFloor(task, floorLabel, building)),
+      status: aggregateFloorStatus([], building.floorProgress[0] || building.progress || 0),
+      openCount: 0,
+      delayCount: 0
+    };
+  }
+  const index = parseFloorNumber(floorLabel) - 1;
+  return floorDetails[index] || {
+    label: floorLabel,
+    progress: building.floorProgress[index] || 0,
+    tasks: building.related.filter((task) => taskMatchesFloor(task, floorLabel, building)),
+    status: aggregateFloorStatus([], building.floorProgress[index] || 0),
+    openCount: 0,
+    delayCount: 0
+  };
 }
 
 function aggregateFloorStatus(tasks, progress) {
