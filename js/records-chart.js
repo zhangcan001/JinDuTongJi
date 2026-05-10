@@ -28,8 +28,8 @@
               <td><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
               <td>
                 <div class="row-actions">
-                  <button class="icon-btn" title="编辑节点" data-edit-task="${escapeAttr(task.id)}">✎</button>
-                  <button class="icon-btn" title="删除节点" data-delete-task="${escapeAttr(task.id)}">×</button>
+                  <button class="icon-btn" title="编辑节点" aria-label="编辑节点 ${escapeAttr(task.name || task.system || task.id)}" data-edit-task="${escapeAttr(task.id)}">✎</button>
+                  <button class="icon-btn" title="删除节点" aria-label="删除节点 ${escapeAttr(task.name || task.system || task.id)}" data-delete-task="${escapeAttr(task.id)}">×</button>
                 </div>
               </td>
             </tr>
@@ -40,37 +40,6 @@
 
   renderTaskPagination(filteredTasks.length, totalPages);
   updateBulkTaskToolbar();
-
-  els.taskTable.querySelectorAll("[data-select-task]").forEach((input) => {
-    input.addEventListener("change", () => {
-      if (input.checked) selectedTaskIds.add(input.dataset.selectTask);
-      else selectedTaskIds.delete(input.dataset.selectTask);
-      updateBulkTaskToolbar();
-    });
-  });
-  els.taskTable.querySelectorAll("[data-edit-task]").forEach((button) => {
-    button.addEventListener("click", () => editTask(button.dataset.editTask));
-  });
-  els.taskTable.querySelectorAll("[data-locate-task]").forEach((button) => {
-    button.addEventListener("click", () => locateTaskInModel(button.dataset.locateTask));
-  });
-  els.taskTable.querySelectorAll("[data-quick-progress]").forEach((button) => {
-    button.addEventListener("click", () => quickUpdateTaskProgress(button.dataset.taskId, Number(button.dataset.quickProgress)));
-  });
-
-  els.taskTable.querySelectorAll("[data-delete-task]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!(await confirmAction("确定删除这个进度节点吗？", { title: "删除进度节点", okText: "删除" }))) return;
-      if (!ensureCanEdit("删除进度节点")) return;
-      createRestorePoint("删除进度节点");
-      const removed = state.tasks.find((task) => task.id === button.dataset.deleteTask);
-      if (!canEditTask(removed)) return;
-      state.tasks = state.tasks.filter((task) => task.id !== button.dataset.deleteTask);
-      recordAudit("删除进度节点", removed?.name || "");
-      saveState();
-      render();
-    });
-  });
 }
 
 function renderTaskPagination(total, totalPages) {
@@ -85,12 +54,43 @@ function renderTaskPagination(total, totalPages) {
       <button type="button" data-task-page="next" ${taskFilters.page >= totalPages ? "disabled" : ""}>下一页</button>
     </div>
   `;
-  els.taskPagination.querySelectorAll("[data-task-page]").forEach((button) => {
-    button.addEventListener("click", () => {
-      taskFilters.page += button.dataset.taskPage === "next" ? 1 : -1;
-      renderTasks();
-    });
-  });
+}
+
+function handleTaskTableChange(event) {
+  const input = event.target.closest("[data-select-task]");
+  if (!input) return;
+  if (input.checked) selectedTaskIds.add(input.dataset.selectTask);
+  else selectedTaskIds.delete(input.dataset.selectTask);
+  updateBulkTaskToolbar();
+}
+
+async function handleTaskTableClick(event) {
+  const editButton = event.target.closest("[data-edit-task]");
+  if (editButton) return editTask(editButton.dataset.editTask);
+
+  const locateButton = event.target.closest("[data-locate-task]");
+  if (locateButton) return locateTaskInModel(locateButton.dataset.locateTask);
+
+  const progressButton = event.target.closest("[data-quick-progress]");
+  if (progressButton) return quickUpdateTaskProgress(progressButton.dataset.taskId, Number(progressButton.dataset.quickProgress));
+
+  const deleteButton = event.target.closest("[data-delete-task]");
+  if (!deleteButton) return;
+  if (!(await confirmAction("确定删除这个进度节点吗？", { title: "删除进度节点", okText: "删除" }))) return;
+  if (!ensureCanEdit("删除进度节点")) return;
+  createRestorePoint("删除进度节点");
+  const removed = state.tasks.find((task) => task.id === deleteButton.dataset.deleteTask);
+  if (!canEditTask(removed)) return;
+  state.tasks = state.tasks.filter((task) => task.id !== deleteButton.dataset.deleteTask);
+  recordAudit("删除进度节点", removed?.name || "");
+  commitStateChange("data");
+}
+
+function handleTaskPaginationClick(event) {
+  const button = event.target.closest("[data-task-page]");
+  if (!button) return;
+  taskFilters.page += button.dataset.taskPage === "next" ? 1 : -1;
+  renderTasks();
 }
 
 function canEditTask(task) {
@@ -111,8 +111,7 @@ function quickUpdateTaskProgress(taskId, progress) {
   task.progress = progress;
   task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
   recordAudit("快速更新节点", `${task.name}: ${progress}%`);
-  saveState();
-  render();
+  commitStateChange("data");
   showToast("节点进度已更新");
 }
 
@@ -157,8 +156,7 @@ function bulkSetTaskProgress(progress) {
     task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
   });
   recordAudit("批量更新节点", `${tasks.length} 项设为 ${progress}%`);
-  saveState();
-  render();
+  commitStateChange("data");
   showToast(`已批量更新 ${tasks.length} 项`);
 }
 
@@ -187,8 +185,7 @@ function bulkCreateIssues() {
     });
   });
   recordAudit("批量生成整改", `${tasks.length} 项`);
-  saveState();
-  render();
+  commitStateChange("data");
   showToast(`已生成 ${tasks.length} 条整改`);
 }
 
@@ -208,8 +205,7 @@ async function bulkDeleteTasks() {
   state.tasks = state.tasks.filter((task) => !ids.has(task.id));
   selectedTaskIds.clear();
   recordAudit("批量删除节点", `${tasks.length} 项`);
-  saveState();
-  render();
+  commitStateChange("data");
   showToast(`已删除 ${tasks.length} 项`);
 }
 
@@ -285,8 +281,7 @@ function saveTaskFromForm(event) {
     recordAudit("新增进度节点", payload.name);
   }
   resetTaskForm();
-  saveState();
-  render();
+  commitStateChange("data");
   showToast(existing ? "节点已保存" : "节点已添加");
 }
 
@@ -336,7 +331,11 @@ function syncTaskFilterControls(tasks) {
 
 function syncFilterSelect(select, options, selectedValue) {
   if (!select) return;
-  select.innerHTML = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+  const signature = options.map(([value, label]) => `${value}\u0000${label}`).join("\u0001");
+  if (select.dataset.optionSignature !== signature) {
+    select.innerHTML = options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("");
+    select.dataset.optionSignature = signature;
+  }
   select.value = options.some(([value]) => value === selectedValue) ? selectedValue : "all";
   if (select.value !== selectedValue) {
     if (select === els.taskBuildingFilter) taskFilters.building = select.value;
@@ -382,9 +381,9 @@ function renderIssues() {
               </div>
               <div class="issue-flow">${issueFlowHtml(issue.status)}</div>
               <div class="issue-actions">
-                <button data-advance-issue="${escapeAttr(issue.id)}" type="button">${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"}</button>
-                <button data-edit-issue="${escapeAttr(issue.id)}" type="button">编辑</button>
-                <button data-delete-issue="${escapeAttr(issue.id)}" type="button">删除</button>
+                <button data-advance-issue="${escapeAttr(issue.id)}" type="button" aria-label="${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"} ${escapeAttr(issue.title)}">${normalizeIssueStatus(issue.status) === "已闭合" ? "重新打开" : "推进状态"}</button>
+                <button data-edit-issue="${escapeAttr(issue.id)}" type="button" aria-label="编辑整改项 ${escapeAttr(issue.title)}">编辑</button>
+                <button data-delete-issue="${escapeAttr(issue.id)}" type="button" aria-label="删除整改项 ${escapeAttr(issue.title)}">删除</button>
               </div>
             </article>
           `;
@@ -393,37 +392,36 @@ function renderIssues() {
     `;
   }).join("");
 
-  document.querySelectorAll("[data-advance-issue]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!ensureCanEdit("推进整改状态")) return;
-      const issue = state.issues.find((item) => item.id === button.dataset.advanceIssue);
-      issue.status = nextIssueStatus(issue.status);
-      if (normalizeIssueStatus(issue.status) === "已闭合" && !issue.closedAt) issue.closedAt = localDateText(today);
-      if (normalizeIssueStatus(issue.status) === "整改中") issue.rectifyCount = Number(issue.rectifyCount || 0) + 1;
-      recordAudit("推进整改状态", `${issue.title} -> ${issue.status}`);
-      saveState();
-      render();
-      showToast("整改状态已更新");
-    });
-  });
+}
 
-  document.querySelectorAll("[data-edit-issue]").forEach((button) => {
-    button.addEventListener("click", () => editIssue(button.dataset.editIssue));
-  });
+async function handleIssueBoardClick(event) {
+  const advanceButton = event.target.closest("[data-advance-issue]");
+  if (advanceButton) {
+    if (!ensureCanEdit("推进整改状态")) return;
+    const issue = state.issues.find((item) => item.id === advanceButton.dataset.advanceIssue);
+    if (!issue) return;
+    issue.status = nextIssueStatus(issue.status);
+    if (normalizeIssueStatus(issue.status) === "已闭合" && !issue.closedAt) issue.closedAt = localDateText(today);
+    if (normalizeIssueStatus(issue.status) === "整改中") issue.rectifyCount = Number(issue.rectifyCount || 0) + 1;
+    recordAudit("推进整改状态", `${issue.title} -> ${issue.status}`);
+    commitStateChange("data");
+    showToast("整改状态已更新");
+    return;
+  }
 
-  document.querySelectorAll("[data-delete-issue]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!(await confirmAction("确定删除这个整改项吗？", { title: "删除整改项", okText: "删除" }))) return;
-      if (!ensureCanEdit("删除整改项")) return;
-      createRestorePoint("删除整改项");
-      const removed = state.issues.find((issue) => issue.id === button.dataset.deleteIssue);
-      state.issues = state.issues.filter((issue) => issue.id !== button.dataset.deleteIssue);
-      recordAudit("删除整改项", removed?.title || "");
-      saveState();
-      render();
-      showToast("整改项已删除");
-    });
-  });
+  const editButton = event.target.closest("[data-edit-issue]");
+  if (editButton) return editIssue(editButton.dataset.editIssue);
+
+  const deleteButton = event.target.closest("[data-delete-issue]");
+  if (!deleteButton) return;
+  if (!(await confirmAction("确定删除这个整改项吗？", { title: "删除整改项", okText: "删除" }))) return;
+  if (!ensureCanEdit("删除整改项")) return;
+  createRestorePoint("删除整改项");
+  const removed = state.issues.find((issue) => issue.id === deleteButton.dataset.deleteIssue);
+  state.issues = state.issues.filter((issue) => issue.id !== deleteButton.dataset.deleteIssue);
+  recordAudit("删除整改项", removed?.title || "");
+  commitStateChange("data");
+  showToast("整改项已删除");
 }
 
 function filterIssues(issues) {
@@ -551,86 +549,6 @@ function statusClassForIssue(status) {
     待复验: "issue-review",
     已闭合: "issue-closed"
   }[normalizeIssueStatus(status)] || "issue-open";
-}
-
-function drawChart(tasks) {
-  const ctx = els.chart.getContext("2d");
-  const ratio = window.devicePixelRatio || 1;
-  const width = els.chart.width = els.chart.clientWidth * ratio;
-  const height = els.chart.height = 220 * ratio;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, els.chart.clientWidth, 220);
-
-  const chartWidth = els.chart.clientWidth;
-  const points = tasks.length
-    ? tasks
-        .slice()
-        .sort((a, b) => a.planned.localeCompare(b.planned))
-        .map((task, index, arr) => ({
-          label: task.planned.slice(5),
-          plan: Math.round(((index + 1) / arr.length) * 100),
-          actual: Number(task.progress || 0)
-        }))
-    : [
-        { label: "05-01", plan: 25, actual: 20 },
-        { label: "05-08", plan: 50, actual: 38 },
-        { label: "05-15", plan: 75, actual: 62 },
-        { label: "05-22", plan: 100, actual: 80 }
-      ];
-
-  ctx.strokeStyle = "rgba(139, 235, 255, 0.16)";
-  ctx.lineWidth = 1;
-  ctx.font = "12px Microsoft YaHei";
-  ctx.fillStyle = "#83a4b7";
-  for (let i = 0; i <= 4; i += 1) {
-    const y = 20 + i * 42;
-    ctx.beginPath();
-    ctx.moveTo(42, y);
-    ctx.lineTo(chartWidth - 18, y);
-    ctx.stroke();
-    ctx.fillText(`${100 - i * 25}%`, 6, y + 4);
-  }
-
-  plotLine(ctx, points, "plan", "#78a8ff", chartWidth);
-  plotLine(ctx, points, "actual", "#7dffcb", chartWidth);
-
-  ctx.fillStyle = "#78a8ff";
-  ctx.fillRect(44, 194, 12, 3);
-  ctx.fillText("计划", 62, 198);
-  ctx.fillStyle = "#7dffcb";
-  ctx.fillRect(108, 194, 12, 3);
-  ctx.fillText("实际", 126, 198);
-}
-
-function plotLine(ctx, points, key, color, chartWidth) {
-  const left = 48;
-  const right = chartWidth - 24;
-  const top = 20;
-  const bottom = 188;
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    const x = points.length === 1 ? left : left + ((right - left) * index) / (points.length - 1);
-    const y = bottom - ((bottom - top) * point[key]) / 100;
-    if (index === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  });
-  ctx.stroke();
-
-  points.forEach((point, index) => {
-    const x = points.length === 1 ? left : left + ((right - left) * index) / (points.length - 1);
-    const y = bottom - ((bottom - top) * point[key]) / 100;
-    ctx.beginPath();
-    ctx.arc(x, y, 4, 0, Math.PI * 2);
-    ctx.fill();
-    if (key === "actual") {
-      ctx.fillStyle = "#83a4b7";
-      ctx.fillText(point.label, x - 14, 214);
-      ctx.fillStyle = color;
-    }
-  });
 }
 
 function setDefaultDates() {

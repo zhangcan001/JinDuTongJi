@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "test": "node tests/business-rules.test.js && node tests/core-flows.test.js && npm run test:ui",
+    "lint": "node tests/lint.test.js",
+    "test": "npm run lint && node tests/business-rules.test.js && node tests/core-flows.test.js && node tests/performance.test.js && npm run test:ui",
     "test:ui": "node tests/ui-smoke.test.js"
   },
   "devDependencies": {

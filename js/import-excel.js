@@ -11,16 +11,8 @@ async function importProgressExcel(event) {
     return;
   }
 
-  if (!window.XLSX) {
-    els.importResult.textContent = "Excel 解析库未加载成功，请确认本地 js/vendor/xlsx.full.min.js 文件存在并已正确加载。";
-    event.target.value = "";
-    return;
-  }
-
   try {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-    const rows = readWorkbookRows(workbook);
+    const rows = await parseImportFileRows(file);
     if (rows.length > MAX_IMPORT_ROWS) {
       throw new Error(`本次文件包含 ${rows.length} 行，超过 ${MAX_IMPORT_ROWS} 行上限，请拆分后导入`);
     }
@@ -95,17 +87,6 @@ function validateImportRows(rows) {
 
 function importRowLabel(row, rowNumber) {
   return `${row.来源工作表 ? `工作表“${row.来源工作表}”` : "工作表"}第 ${rowNumber} 行`;
-}
-
-function readWorkbookRows(workbook) {
-  return workbook.SheetNames
-    .filter((sheetName) => !/说明|填报说明|readme/i.test(sheetName))
-    .flatMap((sheetName) => {
-      const sheet = workbook.Sheets[sheetName];
-      return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false })
-        .filter((row) => Object.values(row).some((value) => String(value || "").trim()))
-        .map((row) => ({ ...row, 来源工作表: sheetName }));
-    });
 }
 
 function previewImportedRows(rows) {

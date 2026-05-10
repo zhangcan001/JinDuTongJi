@@ -53,7 +53,7 @@ function bindEvents() {
     taskFilters.page = 1;
     clearTimeout(globalSearchRenderTimer);
     globalSearchRenderTimer = setTimeout(() => {
-      render();
+      renderSearchResultsForActiveView();
       persistUiPreferences();
     }, 180);
   });
@@ -98,6 +98,10 @@ function bindEvents() {
     persistUiPreferences();
   });
   els.selectAllTasks?.addEventListener("change", toggleSelectPageTasks);
+  els.taskTable?.addEventListener("change", handleTaskTableChange);
+  els.taskTable?.addEventListener("click", handleTaskTableClick);
+  els.taskPagination?.addEventListener("click", handleTaskPaginationClick);
+  els.issueBoard?.addEventListener("click", handleIssueBoardClick);
   els.bulkTaskToolbar?.querySelectorAll("[data-bulk-progress]").forEach((button) => {
     button.addEventListener("click", () => bulkSetTaskProgress(Number(button.dataset.bulkProgress)));
   });
@@ -221,6 +225,61 @@ function render() {
   renderRestorePointPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
+}
+
+function renderDataPanels() {
+  renderDashboard();
+  renderTasks();
+  renderIssues();
+  renderProjectScope();
+  renderBaselinePanel();
+  renderWeightPanel();
+  renderRestorePointPanel();
+  renderDataHealthPanel();
+  renderAuditLogPanel();
+}
+
+function renderSearchResultsForActiveView() {
+  const activeView = document.querySelector(".nav-item.active")?.dataset.view || "dashboard";
+  if (activeView === "schedule") {
+    renderTasks();
+    renderIssues();
+    renderProjectScope();
+    renderDashboard();
+    return;
+  }
+  if (activeView === "issues") {
+    renderIssues();
+    renderTasks();
+    renderDashboard();
+    return;
+  }
+  if (activeView === "scope") {
+    renderProjectScope();
+    renderTasks();
+    renderDashboard();
+    return;
+  }
+  renderDashboard();
+  renderTasks();
+  renderIssues();
+}
+
+function commitStateChange(refresh = "all") {
+  saveState();
+  if (refresh === "data") {
+    renderDataPanels();
+    return;
+  }
+  if (refresh === "tasks") {
+    renderTasks();
+    renderDashboard();
+    renderProjectScope();
+    renderDataHealthPanel();
+    renderAuditLogPanel();
+    return;
+  }
+  render();
 }
 
 function renderAppVersion() {

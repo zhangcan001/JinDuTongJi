@@ -45,6 +45,7 @@ loadScripts(context, [
   "js/dashboard.js",
   "js/state-import.js",
   "js/storage-audit.js",
+  "js/import-file-reader.js",
   "js/import-excel.js"
 ]);
 
@@ -54,6 +55,9 @@ vm.runInContext(`
     demoState,
     validateImportRows,
     normalizeImportRow,
+    previewImportedRows,
+    applyImportedRows,
+    stageImportedRowsForReview,
     isImportFileTooLarge,
     migrateState,
     currentProjectItems,
@@ -117,6 +121,49 @@ assert.equal(validation.validRows.length, 1);
 assert.equal(validation.invalidRows.length, 1);
 assert.ok(validation.invalidRows[0].problems.some((item) => item.includes("楼层超出楼栋范围")));
 assert.ok(validation.invalidRows[0].problems.some((item) => item.includes("实际完成情况只能为")));
+
+const duplicatePreview = api.previewImportedRows([
+  {
+    项目: "城东综合体一期",
+    楼栋: "A1",
+    楼层: "1层",
+    专业: "机电",
+    施工单位: "机电单位",
+    施工内容: "室内给水系统",
+    计划完成时间: "2026-05-12",
+    实际完成情况: "施工中"
+  },
+  {
+    项目: "城东综合体一期",
+    楼栋: "A1",
+    楼层: "1层",
+    专业: "机电",
+    施工单位: "机电单位",
+    施工内容: "室内给水系统",
+    计划完成时间: "2026-05-13",
+    实际完成情况: "已完成"
+  }
+]);
+assert.equal(duplicatePreview.duplicateItems.length, 1);
+
+const importRows = [{
+  项目: "城东综合体一期",
+  楼栋: "A1",
+  楼层: "1层",
+  专业: "机电",
+  施工单位: "机电单位",
+  施工内容: "UI导入测试系统",
+  计划完成时间: "2026-05-23",
+  实际完成情况: "未开始"
+}];
+const beforeImportCount = context.state.tasks.length;
+assert.equal(api.applyImportedRows(importRows, "updateOnly").skipped, 1);
+assert.equal(context.state.tasks.length, beforeImportCount);
+assert.equal(api.applyImportedRows(importRows, "appendOnly").created, 1);
+assert.equal(api.applyImportedRows(importRows, "appendOnly").skipped, 1);
+const staged = api.stageImportedRowsForReview([{ ...importRows[0], 施工内容: "UI待复核系统" }], "review.csv");
+assert.equal(staged.created, 1);
+assert.ok(context.state.pendingImports.some((item) => item.fileName === "review.csv"));
 
 const migrated = api.migrateState({
   projects: [{ id: "p-custom", name: "测试项目" }],

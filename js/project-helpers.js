@@ -154,3 +154,8 @@ function removeCoveredElevatorFloorTasks(importedTask) {
     return normalizedFloorKey(task.floor) === "整栋";
   });
 }
+
+function findExistingTaskForImport(importedTask) {
+  const importedKey = taskKey(importedTask);
+  return state.tasks.find((task) => taskKey(task) === importedKey);
+}
