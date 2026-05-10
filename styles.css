@@ -155,6 +155,15 @@ button {
   font-size: 12px;
 }
 
+.app-version {
+  position: relative;
+  align-self: flex-start;
+  margin: -18px 8px 0;
+  color: rgba(139, 235, 255, 0.68);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .nav-list {
   position: relative;
   display: grid;
@@ -2860,6 +2869,10 @@ body.office-mode .today-item button {
     overflow-x: auto;
   }
 
+  .app-version {
+    margin-top: -8px;
+  }
+
   .nav-item {
     flex: 0 0 auto;
     width: auto;
@@ -2972,6 +2985,20 @@ body.office-mode .today-item button {
 
   .top-actions > * {
     width: 100%;
+  }
+
+  .table-wrap,
+  .model-detail-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    min-width: 760px;
+  }
+
+  .nav-list {
+    padding-bottom: 4px;
   }
 
   .screen-header {

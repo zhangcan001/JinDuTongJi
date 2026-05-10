@@ -97,6 +97,9 @@ function currentProjectScope() {
 }
 
 function migrateState(nextState) {
+  const previousSchemaVersion = Number(nextState.schemaVersion || 1);
+  nextState.schemaVersion = STATE_SCHEMA_VERSION;
+  nextState.appVersion = APP_VERSION;
   nextState.projectScopes = {
     ...cloneData(demoState.projectScopes),
     ...(nextState.projectScopes || {})
@@ -143,6 +146,12 @@ function migrateState(nextState) {
   }));
   nextState.diaries = nextState.diaries || [];
   nextState.meetings = nextState.meetings || [];
+  if (previousSchemaVersion < 2) {
+    nextState.tasks.forEach((task) => {
+      task.owner = task.owner || task.discipline || "未填责任单位";
+      task.progress = clampProgress(task.progress);
+    });
+  }
   invalidateStateCache();
   return nextState;
 }
@@ -213,6 +222,10 @@ function buildDelayExportRows() {
   return buildTaskExportRows(currentProjectItems("tasks").filter((task) => getTaskStatus(task).className === "delay"));
 }
 
+function exportProjectCsv(prefix, extension, rows) {
+  exportCsv(datedFileName(prefix, currentProjectName(), extension, today), rows);
+}
+
 function exportCsv(fileName, rows) {
   const data = rows.length ? rows : [{ 提示: "当前筛选条件下暂无数据" }];
   const headers = Object.keys(data[0]);
@@ -258,7 +271,7 @@ function exportWeeklyReportFile() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `监理周报-${currentProjectName()}-${localDateText(today)}.html`;
+  link.download = datedFileName("监理周报", currentProjectName(), "html", today);
   link.click();
   URL.revokeObjectURL(url);
   showToast("正式周报已导出");
@@ -287,7 +300,7 @@ function exportRectificationNotice() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `整改通知单-${currentProjectName()}-${localDateText(today)}.txt`;
+  link.download = datedFileName("整改通知单", currentProjectName(), "txt", today);
   link.click();
   URL.revokeObjectURL(url);
   showToast("整改通知单已导出");
@@ -302,7 +315,7 @@ function printCurrentReport() {
 
 function exportLatestImportDiff() {
   const latest = (state.importHistory || []).find((item) => item.projectId === state.selectedProjectId);
-  exportCsv("最近导入差异.csv", latest?.details?.length ? latest.details : [{ 提示: "暂无可导出的导入差异" }]);
+  exportProjectCsv("最近导入差异", "csv", latest?.details?.length ? latest.details : [{ 提示: "暂无可导出的导入差异" }]);
 }
 
 function createIssuesFromDelayedTasks() {

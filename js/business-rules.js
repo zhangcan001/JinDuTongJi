@@ -6,6 +6,21 @@
     if (!root[name]) root[name] = value;
   });
 })(typeof globalThis !== "undefined" ? globalThis : window, function () {
+  const APP_VERSION = "2026.05.10";
+  const STATE_SCHEMA_VERSION = 2;
+  const TASK_STATUS = {
+    DONE: "已完成",
+    DELAY: "已滞后",
+    RISK: "临期",
+    NORMAL: "正常"
+  };
+  const ISSUE_STATUS_FLOW = ["未整改", "整改中", "待复验", "已闭合"];
+  const COMPLETION_STATUS = {
+    NOT_STARTED: "未开始",
+    DONE: "已完成",
+    ACTIVE: "施工中"
+  };
+
   function localDateText(date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -23,25 +38,24 @@
   }
 
   function getTaskStatus(task, baseDate = new Date()) {
-    if (task.actual || Number(task.progress) >= 100) return { label: "已完成", className: "done" };
+    if (task.actual || Number(task.progress) >= 100) return { label: TASK_STATUS.DONE, className: "done" };
     const delta = daysBetween(task.planned, baseDate);
-    if (delta < 0) return { label: "已滞后", className: "delay" };
-    if (delta <= 7) return { label: "临期", className: "risk" };
-    return { label: "正常", className: "normal" };
+    if (delta < 0) return { label: TASK_STATUS.DELAY, className: "delay" };
+    if (delta <= 7) return { label: TASK_STATUS.RISK, className: "risk" };
+    return { label: TASK_STATUS.NORMAL, className: "normal" };
   }
 
   function normalizeIssueStatus(status) {
-    if (status === "已闭合") return "已闭合";
-    if (status === "跟踪中") return "整改中";
-    if (status === "待复验") return "待复验";
-    if (status === "整改中") return "整改中";
-    return "未整改";
+    if (status === ISSUE_STATUS_FLOW[3]) return ISSUE_STATUS_FLOW[3];
+    if (status === "跟踪中") return ISSUE_STATUS_FLOW[1];
+    if (status === ISSUE_STATUS_FLOW[2]) return ISSUE_STATUS_FLOW[2];
+    if (status === ISSUE_STATUS_FLOW[1]) return ISSUE_STATUS_FLOW[1];
+    return ISSUE_STATUS_FLOW[0];
   }
 
   function nextIssueStatus(status) {
-    const flow = ["未整改", "整改中", "待复验", "已闭合"];
-    const index = flow.indexOf(normalizeIssueStatus(status));
-    return flow[(index + 1) % flow.length];
+    const index = ISSUE_STATUS_FLOW.indexOf(normalizeIssueStatus(status));
+    return ISSUE_STATUS_FLOW[(index + 1) % ISSUE_STATUS_FLOW.length];
   }
 
   function classifyDelayReason(text) {
@@ -58,13 +72,31 @@
     return `"${text}"`;
   }
 
+  function safeFilePart(value) {
+    return String(value || "")
+      .replace(/[\\/:*?"<>|]/g, "")
+      .replace(/\s+/g, "")
+      .slice(0, 40) || "未命名";
+  }
+
+  function datedFileName(prefix, projectName, extension, date = new Date()) {
+    return `${prefix}-${safeFilePart(projectName)}-${localDateText(date)}.${extension}`;
+  }
+
   return {
+    APP_VERSION,
+    STATE_SCHEMA_VERSION,
+    TASK_STATUS,
+    ISSUE_STATUS_FLOW,
+    COMPLETION_STATUS,
     localDateText,
     daysBetween,
     getTaskStatus,
     normalizeIssueStatus,
     nextIssueStatus,
     classifyDelayReason,
-    csvCell
+    csvCell,
+    safeFilePart,
+    datedFileName
   };
 });

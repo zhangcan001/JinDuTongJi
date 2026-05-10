@@ -176,7 +176,8 @@ async function restoreFromPoint(pointId) {
 function exportDataBackup() {
   const payload = {
     app: "JinDuTongJi",
-    version: 1,
+    version: APP_VERSION,
+    schemaVersion: STATE_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     state
   };
@@ -184,7 +185,7 @@ function exportDataBackup() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `监理进度数据备份-${localDateText(today)}.json`;
+  link.download = datedFileName("监理进度数据备份", currentProjectName(), "json", today);
   link.click();
   URL.revokeObjectURL(url);
   state.uiPreferences.lastBackupAt = new Date().toISOString();
@@ -206,7 +207,8 @@ async function importDataBackup(event) {
     if (!Array.isArray(nextState.projects) || !Array.isArray(nextState.tasks)) {
       throw new Error("备份文件格式不正确");
     }
-    if (!(await confirmAction("恢复备份会替换当前浏览器中的全部数据，确定继续吗？", { title: "恢复数据备份", okText: "恢复" }))) return;
+    const preview = backupPreviewText(nextState, payload, file.name);
+    if (!(await confirmAction(`${preview}\n\n恢复备份会替换当前浏览器中的全部数据，确定继续吗？`, { title: "恢复数据备份", okText: "恢复" }))) return;
     createRestorePoint(`恢复备份 ${file.name}`);
     const keepRestorePoints = state.restorePoints || [];
     state = migrateState(nextState);
@@ -225,6 +227,21 @@ async function importDataBackup(event) {
   } finally {
     event.target.value = "";
   }
+}
+
+function backupPreviewText(nextState, payload, fileName) {
+  const projectCount = Array.isArray(nextState.projects) ? nextState.projects.length : 0;
+  const taskCount = Array.isArray(nextState.tasks) ? nextState.tasks.length : 0;
+  const issueCount = Array.isArray(nextState.issues) ? nextState.issues.length : 0;
+  const scopeCount = Object.keys(nextState.projectScopes || {}).length;
+  const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : "未知时间";
+  const schema = payload.schemaVersion || nextState.schemaVersion || 1;
+  return [
+    `文件：${fileName}`,
+    `导出时间：${exportedAt}`,
+    `项目 ${projectCount} 个｜节点 ${taskCount} 条｜整改 ${issueCount} 条｜范围 ${scopeCount} 组`,
+    `数据版本：${schema}`
+  ].join("\n");
 }
 
 function renderAuditLogPanel() {

@@ -62,7 +62,13 @@
 
 ## 本地运行
 
-这是一个静态前端项目，不需要安装依赖。可以直接打开 `index.html`，或用本地静态服务运行：
+这是一个静态前端项目，页面本身可以直接打开 `index.html`。如果需要运行自动化检查，请先安装 Node 依赖：
+
+```powershell
+npm install
+```
+
+本地静态服务运行：
 
 ```powershell
 npx serve .
@@ -76,17 +82,23 @@ http://127.0.0.1:4173/
 
 ## 本地检查
 
-项目包含轻量 Node 测试，用于覆盖进度状态、整改流转、延期原因分类、CSV 转义、导入校验、状态迁移、权限过滤和 IndexedDB 镜像行为：
+项目包含轻量 Node 测试和 UI 冒烟测试，用于覆盖进度状态、整改流转、延期原因分类、CSV 转义、导入校验、状态迁移、权限过滤、IndexedDB 镜像行为和页面基础渲染：
 
 ```powershell
 npm test
+```
+
+如需只运行 UI 冒烟测试：
+
+```powershell
+npm run test:ui
 ```
 
 ## 在线部署
 
 仓库已包含 GitHub Pages 工作流：`.github/workflows/pages.yml`。
 
-推送到 `master` 后，GitHub Actions 会尝试部署静态页面。部署成功后，访问地址通常为：
+推送到 `master` 后，GitHub Actions 会先安装依赖并运行测试，测试通过后再部署静态页面。部署成功后，访问地址通常为：
 
 ```text
 https://zhangcan001.github.io/JinDuTongJi/

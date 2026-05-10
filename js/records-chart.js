@@ -195,7 +195,7 @@ function bulkCreateIssues() {
 function bulkExportTasks() {
   const tasks = selectedTasks();
   if (!tasks.length) return showToast("请先选择节点", "warn");
-  exportCsv("选中节点台账.csv", buildTaskExportRows(tasks));
+  exportProjectCsv("选中节点台账", "csv", buildTaskExportRows(tasks));
 }
 
 async function bulkDeleteTasks() {

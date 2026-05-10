@@ -38,5 +38,11 @@ assert.equal(rules.classifyDelayReason("作业面穿插协调困难"), "穿插")
 assert.equal(rules.classifyDelayReason("其他原因"), "综合");
 
 assert.equal(rules.csvCell('A"B'), '"A""B"');
+assert.equal(rules.STATE_SCHEMA_VERSION, 2);
+assert.equal(rules.TASK_STATUS.DONE, "已完成");
+assert.deepEqual(rules.ISSUE_STATUS_FLOW, ["未整改", "整改中", "待复验", "已闭合"]);
+assert.equal(rules.COMPLETION_STATUS.ACTIVE, "施工中");
+assert.equal(rules.safeFilePart('A/B:*?"<>| 项目'), "AB项目");
+assert.equal(rules.datedFileName("节点台账", "城东综合体一期", "csv", base), "节点台账-城东综合体一期-2026-05-10.csv");
 
 console.log("business rules tests passed");

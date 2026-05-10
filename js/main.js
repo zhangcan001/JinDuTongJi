@@ -1,5 +1,7 @@
 ﻿let state = loadState();
 
+let globalSearchRenderTimer = null;
+
 Object.assign(els, {
   screenProjectName: document.querySelector("#screenProjectName"),
   missionStatus: document.querySelector("#missionStatus"),
@@ -49,7 +51,11 @@ function bindEvents() {
     globalSearchQuery = event.target.value.trim();
     taskFilters.query = globalSearchQuery;
     taskFilters.page = 1;
-    render();
+    clearTimeout(globalSearchRenderTimer);
+    globalSearchRenderTimer = setTimeout(() => {
+      render();
+      persistUiPreferences();
+    }, 180);
   });
   els.buildingScopeForm?.addEventListener("submit", saveScopeBuilding);
   els.buildingBatchForm?.addEventListener("submit", saveBuildingBatch);
@@ -59,9 +65,9 @@ function bindEvents() {
   els.excelInput.addEventListener("change", importProgressExcel);
   els.downloadTemplateBtn.addEventListener("click", downloadExcelTemplate);
   els.saveBaselineBtn?.addEventListener("click", savePlanBaseline);
-  els.exportDelayBtn?.addEventListener("click", () => exportCsv("滞后清单.csv", buildDelayExportRows()));
-  els.exportTasksBtn?.addEventListener("click", () => exportCsv("节点台账.csv", buildTaskExportRows(currentProjectItems("tasks"))));
-  els.exportIssuesBtn?.addEventListener("click", () => exportCsv("整改台账.csv", buildIssueExportRows()));
+  els.exportDelayBtn?.addEventListener("click", () => exportProjectCsv("滞后清单", "csv", buildDelayExportRows()));
+  els.exportTasksBtn?.addEventListener("click", () => exportProjectCsv("节点台账", "csv", buildTaskExportRows(currentProjectItems("tasks"))));
+  els.exportIssuesBtn?.addEventListener("click", () => exportProjectCsv("整改台账", "csv", buildIssueExportRows()));
   els.exportReportBtn?.addEventListener("click", exportWeeklyReportFile);
   els.printReportBtn?.addEventListener("click", printCurrentReport);
   els.exportImportDiffBtn?.addEventListener("click", exportLatestImportDiff);
@@ -196,6 +202,7 @@ function bindEvents() {
 }
 
 function render() {
+  renderAppVersion();
   if (els.roleSelect) els.roleSelect.value = currentRole();
   if (els.globalSearchInput && els.globalSearchInput.value !== globalSearchQuery) els.globalSearchInput.value = globalSearchQuery;
   document.body.classList.toggle("office-mode", Boolean(state.uiPreferences?.officeMode));
@@ -214,6 +221,11 @@ function render() {
   renderRestorePointPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
+}
+
+function renderAppVersion() {
+  const target = document.querySelector("#appVersion");
+  if (target) target.textContent = `v${APP_VERSION}`;
 }
 
 function persistUiPreferences() {

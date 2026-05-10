@@ -65,7 +65,7 @@ function validateImportRows(rows) {
       problems.push(`楼层超出楼栋范围，${matchedBuilding.name} 只有 ${matchedBuilding.floors} 层`);
     }
     const status = normalized.completionStatus;
-    if (status && !["未开始", "已完成", "施工中"].includes(status)) {
+    if (status && !Object.values(COMPLETION_STATUS).includes(status)) {
       problems.push("实际完成情况只能为：未开始、已完成、施工中");
     }
     const elevatorCount = Number(pickCell(row, ["电梯数量"]) || 0);
@@ -77,19 +77,24 @@ function validateImportRows(rows) {
 
     const buildingMatched = normalized.building.includes("地下")
       || knownBuildings.some((building) => normalized.building.includes(building));
+    const rowLabel = importRowLabel(row, rowNumber);
     if (normalized.projectName && !state.projects.some((project) => project.name === normalized.projectName)) {
-      warnings.push(`第 ${rowNumber} 行：项目“${normalized.projectName}”不存在，导入时将自动创建`);
+      warnings.push(`${rowLabel}：项目“${normalized.projectName}”不存在，导入时将自动创建`);
     }
-    if (normalized.building && !buildingMatched) warnings.push(`第 ${rowNumber} 行：楼栋未在对应项目范围内，已自动补充或待复核`);
+    if (normalized.building && !buildingMatched) warnings.push(`${rowLabel}：楼栋未在对应项目范围内，已自动补充或待复核`);
     if (normalized.system && knownSystems.length && !knownSystems.includes(normalized.system)) {
-      warnings.push(`第 ${rowNumber} 行：施工内容“${normalized.system}”不在既有清单中`);
+      warnings.push(`${rowLabel}：施工内容“${normalized.system}”不在既有清单中`);
     }
 
-    if (problems.length) invalidRows.push({ rowNumber, problems, normalized });
+    if (problems.length) invalidRows.push({ rowNumber, sheetName: row.来源工作表 || "", problems, normalized });
     else validRows.push(row);
   });
 
   return { validRows, invalidRows, warnings };
+}
+
+function importRowLabel(row, rowNumber) {
+  return `${row.来源工作表 ? `工作表“${row.来源工作表}”` : "工作表"}第 ${rowNumber} 行`;
 }
 
 function readWorkbookRows(workbook) {
@@ -196,7 +201,7 @@ function previewResolveBuildingName(value, scope) {
 function renderImportValidation(validation) {
   if (!els.importValidationReport) return;
   const issueHtml = [
-    ...validation.invalidRows.map((item) => `<li class="danger">第 ${item.rowNumber} 行：${escapeHtml(item.problems.join("、"))}</li>`),
+    ...validation.invalidRows.map((item) => `<li class="danger">${escapeHtml(importRowLabel({ 来源工作表: item.sheetName }, item.rowNumber))}：${escapeHtml(item.problems.join("、"))}</li>`),
     ...validation.warnings.map((item) => `<li>${escapeHtml(item)}</li>`)
   ].join("");
   els.importValidationReport.innerHTML = `
@@ -292,7 +297,7 @@ function renderImportPreviewDetails(preview, validation) {
     </div>
   `;
   const invalidItems = validation.invalidRows.map((item) => ({
-    projectName: `第 ${item.rowNumber} 行`,
+    projectName: importRowLabel({ 来源工作表: item.sheetName }, item.rowNumber),
     location: item.normalized?.building || "-",
     name: item.problems.join("、"),
     progress: "-",
@@ -495,9 +500,9 @@ function normalizePercent(value) {
 function completionStatusToProgress(status) {
   const text = String(status || "").trim();
   if (!text) return null;
-  if (text === "已完成") return 100;
-  if (text === "施工中") return 50;
-  if (text === "未开始") return 0;
+  if (text === COMPLETION_STATUS.DONE) return 100;
+  if (text === COMPLETION_STATUS.ACTIVE) return 50;
+  if (text === COMPLETION_STATUS.NOT_STARTED) return 0;
   return null;
 }
 
@@ -870,13 +875,14 @@ function exportImportErrors() {
     return;
   }
   const rows = pendingImport.validation.invalidRows.map((item) => ({
+    工作表: item.sheetName || "",
     行号: item.rowNumber,
     问题: item.problems.join("、"),
     楼栋: item.normalized?.building || "",
     楼层: item.normalized?.floor || "",
     施工内容: item.normalized?.system || item.normalized?.name || ""
   }));
-  exportCsv("导入错误行.csv", rows);
+  exportProjectCsv("导入错误行", "csv", rows);
   showToast("错误行已导出");
 }
 
