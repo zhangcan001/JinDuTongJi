@@ -54,36 +54,42 @@ vm.runInContext(`
 `, context);
 
 const api = context.__perfApi;
-context.state = api.migrateState(api.cloneData(api.demoState));
-context.state.selectedProjectId = "p1";
-context.state.tasks = Array.from({ length: 10000 }, (_, index) => ({
-  id: `perf-${index}`,
-  projectId: "p1",
-  name: `性能节点 ${index}`,
-  discipline: index % 2 ? "机电" : "消防",
-  owner: index % 2 ? "机电单位" : "消防单位",
-  building: `A${(index % 6) + 1}`,
-  floor: `${(index % 18) + 1}层`,
-  system: index % 3 ? "管线安装" : "设备安装",
-  planned: `2026-05-${String((index % 28) + 1).padStart(2, "0")}`,
-  actual: "",
-  progress: index % 101,
-  note: index % 17 === 0 ? "材料未进场" : ""
-}));
+function seedTasks(count) {
+  context.state = api.migrateState(api.cloneData(api.demoState));
+  context.state.selectedProjectId = "p1";
+  context.state.tasks = Array.from({ length: count }, (_, index) => ({
+    id: `perf-${count}-${index}`,
+    projectId: "p1",
+    name: `性能节点 ${index}`,
+    discipline: index % 2 ? "机电" : "消防",
+    owner: index % 2 ? "机电单位" : "消防单位",
+    building: `A${(index % 6) + 1}`,
+    floor: `${(index % 18) + 1}层`,
+    system: index % 3 ? "管线安装" : "设备安装",
+    planned: `2026-05-${String((index % 28) + 1).padStart(2, "0")}`,
+    actual: "",
+    progress: index % 101,
+    note: index % 17 === 0 ? "材料未进场" : ""
+  }));
+  context.invalidateStateCache();
+}
 
-const tasks = api.currentProjectItems("tasks");
-const started = performance.now();
-const filtered = api.currentProjectFilteredTasks(tasks, {
-  query: "安装",
-  status: "all",
-  building: "all",
-  owner: "all",
-  sort: "progressAsc"
+const results = [1000, 5000, 10000].map((count) => {
+  seedTasks(count);
+  const tasks = api.currentProjectItems("tasks");
+  const started = performance.now();
+  const filtered = api.currentProjectFilteredTasks(tasks, {
+    query: "安装",
+    status: "all",
+    building: "all",
+    owner: "all",
+    sort: "progressAsc"
+  });
+  const elapsed = performance.now() - started;
+  assert.equal(tasks.length, count);
+  assert.ok(filtered.length > 0);
+  assert.ok(elapsed < 750, `Filtering ${count} tasks took ${elapsed.toFixed(1)}ms`);
+  return `${count}:${elapsed.toFixed(1)}ms`;
 });
-const elapsed = performance.now() - started;
 
-assert.equal(tasks.length, 10000);
-assert.ok(filtered.length > 0);
-assert.ok(elapsed < 750, `Filtering 10000 tasks took ${elapsed.toFixed(1)}ms`);
-
-console.log(`performance checks passed (${elapsed.toFixed(1)}ms)`);
+console.log(`performance checks passed (${results.join(", ")})`);

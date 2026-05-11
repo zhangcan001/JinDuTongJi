@@ -71,6 +71,20 @@ async function launchBrowser() {
   await page.click("#taskSubmitBtn");
   await page.fill("#taskSearchInput", "UI测试节点");
   await page.waitForFunction(() => document.querySelector("#taskTable")?.textContent.includes("UI测试节点"));
+  assert.equal(await page.locator("#undoBtn").isVisible(), true);
+  assert.equal(await page.locator("#redoBtn").isVisible(), true);
+  assert.ok(await page.locator('#taskTable [data-history-task]').count());
+  await page.evaluate(() => {
+    window.prompt = () => "UI测试视图";
+  });
+  await page.selectOption("#taskSmartFilter", "missingNote");
+  await page.click("#saveTaskViewBtn");
+  await page.waitForFunction(() => document.querySelector("#taskViewSelect")?.querySelector('option[value]:not([value=""])')?.textContent.includes("UI测试视图"));
+  await page.selectOption("#taskSmartFilter", "all");
+  await page.selectOption("#taskViewSelect", { label: "UI测试视图" });
+  await page.waitForFunction(() => document.querySelector("#taskSmartFilter")?.value === "missingNote");
+  await page.click("#taskColumnToggles input[value=\"progress\"]");
+  await page.click("#taskColumnToggles input[value=\"progress\"]");
 
   await page.selectOption("#roleSelect", "viewer");
   await page.fill('#taskForm input[name="name"]', "只读不应新增");
@@ -86,9 +100,18 @@ async function launchBrowser() {
   fs.mkdirSync(fixtureDir, { recursive: true });
   const csvPath = path.join(fixtureDir, "import-preview.csv");
   fs.writeFileSync(csvPath, "\uFEFF楼栋,楼层,专业,施工单位,施工内容,计划完成时间,实际完成情况\nA1,1层,机电,机电单位,室内给水系统,2026-05-22,施工中\n", "utf8");
+  await page.selectOption("#importModeSelect", "upsert");
   await page.setInputFiles("#excelInput", csvPath);
   await page.waitForSelector("#confirmImportBtn");
   assert.ok(await page.locator("#importPreviewPanel").textContent().then((text) => text.includes("导入预览")));
+  await page.fill("#pasteImportText", "楼栋\t楼层\t专业\t施工内容\t计划完成时间\t实际完成情况\nA1\t2层\t机电\t室内排水系统\t2026-05-23\t施工中");
+  await page.click("#pasteImportBtn");
+  await page.waitForSelector("#confirmImportBtn");
+  await page.click("#confirmImportBtn");
+  await page.waitForFunction(() => document.querySelector("#importResult")?.textContent.includes("已导入"));
+  await page.fill("#taskSearchInput", "室内给水系统");
+  await page.waitForFunction(() => document.querySelector("#taskTable")?.textContent.includes("室内给水系统"));
+  await page.fill("#taskSearchInput", "");
 
   await page.click('[data-view="scope"]');
   await page.waitForSelector("#buildingGrid");
