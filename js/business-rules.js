@@ -6,7 +6,7 @@
     if (!root[name]) root[name] = value;
   });
 })(typeof globalThis !== "undefined" ? globalThis : window, function () {
-  const APP_VERSION = "2026.05.10";
+  const APP_VERSION = "2026.05.11";
   const STATE_SCHEMA_VERSION = 2;
   const TASK_STATUS = {
     DONE: "已完成",

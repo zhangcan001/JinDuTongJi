@@ -1,146 +1,3 @@
-let loadedStateFromLocalStorage = false;
-let pendingLocalStateWriteTimer = null;
-let pendingLocalStateSnapshot = "";
-let undoStack = [];
-let redoStack = [];
-let backendStateLoaded = false;
-let pendingBackendStateWriteTimer = null;
-let pendingBackendStateSnapshot = null;
-let backendStateVersion = 0;
-let backendSaveStatusTimer = null;
-let backendBackups = [];
-let backendHealth = null;
-let backendRetryTimer = null;
-let backendRetryAttempt = 0;
-let backendSaveInFlight = false;
-let pendingBackendAuditQueue = [];
-let backendApiUnavailable = false;
-let backendAuthState = { enabled: false, authenticated: false, loading: true };
-
-const BACKEND_PENDING_STATE_KEY = `${STORAGE_KEY}:pending-backend-state`;
-const BACKEND_PENDING_AUDIT_KEY = `${STORAGE_KEY}:pending-backend-audit`;
-
-function loadState() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    loadedStateFromLocalStorage = Boolean(saved);
-    const parsed = saved ? JSON.parse(saved) : cloneData(demoState);
-    return migrateState(parsed);
-  } catch {
-    loadedStateFromLocalStorage = false;
-    localStorage.removeItem(STORAGE_KEY);
-    return migrateState(cloneData(demoState));
-  }
-}
-
-function saveState(options = {}) {
-  try {
-    pendingLocalStateSnapshot = JSON.stringify(state);
-    if (options.immediate) {
-      flushLocalStateWrite();
-    } else {
-      clearTimeout(pendingLocalStateWriteTimer);
-      pendingLocalStateWriteTimer = setTimeout(flushLocalStateWrite, 120);
-    }
-    invalidateStateCache();
-    scheduleStateMirrorToIndexedDB();
-    scheduleStateMirrorToBackend(options);
-  } catch {
-    notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
-  }
-}
-
-function pushUndoSnapshot(reason = "") {
-  const snapshot = cloneData(state);
-  undoStack.push({ id: createId(), reason, time: new Date().toISOString(), state: snapshot });
-  undoStack = undoStack.slice(-20);
-  redoStack = [];
-}
-
-function undoLastStateChange() {
-  if (!undoStack.length) {
-    showToast("没有可撤销的操作", "warn");
-    return;
-  }
-  const currentSnapshot = cloneData(state);
-  const previous = undoStack.pop();
-  redoStack.push({ id: createId(), reason: previous.reason, time: new Date().toISOString(), state: currentSnapshot });
-  redoStack = redoStack.slice(-20);
-  state = migrateState(cloneData(previous.state));
-  recordAudit("撤销操作", previous.reason || "最近一次修改");
-  saveState({ immediate: true });
-  render();
-  showToast("已撤销");
-}
-
-function redoLastStateChange() {
-  if (!redoStack.length) {
-    showToast("没有可重做的操作", "warn");
-    return;
-  }
-  const currentSnapshot = cloneData(state);
-  const next = redoStack.pop();
-  undoStack.push({ id: createId(), reason: next.reason, time: new Date().toISOString(), state: currentSnapshot });
-  undoStack = undoStack.slice(-20);
-  state = migrateState(cloneData(next.state));
-  recordAudit("重做操作", next.reason || "最近一次修改");
-  saveState({ immediate: true });
-  render();
-  showToast("已重做");
-}
-
-function clearRedoHistory() {
-  redoStack = [];
-}
-
-function flushLocalStateWrite() {
-  if (!pendingLocalStateSnapshot) return;
-  clearTimeout(pendingLocalStateWriteTimer);
-  pendingLocalStateWriteTimer = null;
-  try {
-    localStorage.setItem(STORAGE_KEY, pendingLocalStateSnapshot);
-    pendingLocalStateSnapshot = "";
-  } catch {
-    notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
-  }
-}
-
-function showToast(message, tone = "ok") {
-  if (!els.toast) return;
-  els.toast.textContent = message;
-  els.toast.dataset.tone = tone;
-  els.toast.classList.add("show");
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => els.toast.classList.remove("show"), 2400);
-}
-
-function invalidateStateCache() {
-  if (!stateCache) return;
-  stateCache.version += 1;
-  stateCache.projectItems = new Map();
-}
-
-function recordEntityHistory(entityType, entityId, title, changes, summary = "") {
-  state.entityHistory = state.entityHistory || [];
-  state.entityHistory.unshift({
-    id: createId(),
-    projectId: state.selectedProjectId,
-    entityType,
-    entityId,
-    title,
-    changes,
-    summary,
-    time: new Date().toISOString()
-  });
-  state.entityHistory = state.entityHistory.slice(0, 120);
-}
-
-const INDEXED_DB_NAME = "JinDuTongJiDB";
-const INDEXED_DB_VERSION = 1;
-let indexedDbConnectionPromise = null;
-let pendingIndexedDbMirrorTimer = null;
-let pendingIndexedDbSnapshot = null;
-
 function scheduleStateMirrorToIndexedDB() {
   if (!window.indexedDB) return;
   pendingIndexedDbSnapshot = {
@@ -648,6 +505,7 @@ function renderSystemSettingsPanel() {
       ${logs.length ? logs.map((line) => `<article><div><strong>${escapeHtml(String(line))}</strong></div></article>`).join("") : `<article><div><strong>暂无日志</strong><small>点击“刷新状态”或“执行维护”查看系统日志。</small></div></article>`}
     </div>
   `;
+  renderPerformancePanel();
 }
 
 async function createBackendBackup() {
@@ -660,7 +518,7 @@ async function createBackendBackup() {
     renderBackendBackupPanel();
     showToast("数据库备份已创建");
   } catch {
-    showToast("数据库备份失败", "warn");
+    showToast(userFacingError(null, "数据库备份失败"), "warn");
   }
 }
 
@@ -676,8 +534,8 @@ async function runBackendMaintenance() {
     await fetchBackendLogs();
     renderSystemSettingsPanel();
     showToast("系统维护已执行");
-  } catch {
-    showToast("系统维护失败", "warn");
+  } catch (error) {
+    showToast(userFacingError(error, "系统维护失败"), "warn");
   }
 }
 
@@ -698,8 +556,8 @@ async function restoreBackendBackup(name) {
     await fetchBackendBackups();
     render();
     showToast("数据库备份已恢复");
-  } catch {
-    showToast("数据库备份恢复失败", "warn");
+  } catch (error) {
+    showToast(userFacingError(error, "数据库备份恢复失败"), "warn");
   }
 }
 
@@ -726,7 +584,7 @@ async function importBackendJsonBackup(event) {
     render();
     showToast("数据库 JSON 已导入");
   } catch (error) {
-    showToast(`导入失败：${error.message || "请检查 JSON 文件"}`, "warn");
+    showToast(userFacingError(error, "导入失败"), "warn");
   } finally {
     event.target.value = "";
   }
@@ -738,9 +596,27 @@ async function refreshSystemState() {
     refreshBackendHealth(),
     fetchBackendBackups(),
     fetchBackendVersions(),
-    fetchBackendLogs()
+    fetchBackendLogs(),
+    refreshBackendPageStats()
   ]);
   renderSystemSettingsPanel();
+}
+
+async function refreshBackendPageStats() {
+  if (!canUseBackendState()) return null;
+  try {
+    const [tasksResponse, issuesResponse] = await Promise.all([
+      fetch(`./api/tasks?projectId=${encodeURIComponent(state.selectedProjectId)}&limit=1`),
+      fetch(`./api/issues?projectId=${encodeURIComponent(state.selectedProjectId)}&limit=1`)
+    ]);
+    if (!tasksResponse.ok || !issuesResponse.ok) throw new Error("page probe failed");
+    const [tasks, issues] = await Promise.all([tasksResponse.json(), issuesResponse.json()]);
+    backendPageStats = { tasks: tasks.total || 0, issues: issues.total || 0 };
+    return backendPageStats;
+  } catch {
+    backendPageStats = null;
+    return null;
+  }
 }
 
 function recordAudit(action, detail = "") {
@@ -822,8 +698,9 @@ function createRestorePoint(reason) {
   state.restorePoints = state.restorePoints || [];
   const snapshot = cloneData(state);
   snapshot.restorePoints = [];
+  const id = createId();
   state.restorePoints.unshift({
-    id: createId(),
+    id,
     reason,
     createdAt: new Date().toISOString(),
     projectId: state.selectedProjectId,
@@ -833,6 +710,7 @@ function createRestorePoint(reason) {
     state: snapshot
   });
   state.restorePoints = state.restorePoints.slice(0, 14);
+  return id;
 }
 
 function createDailyRestorePointIfNeeded() {
@@ -968,7 +846,7 @@ async function importDataBackup(event) {
     els.importResult.textContent = `已恢复备份：${file.name}`;
     renderImportPreview(null);
   } catch (error) {
-    els.importResult.textContent = `恢复失败：${error.message || "请检查 JSON 备份文件"}`;
+    els.importResult.textContent = userFacingError(error, "恢复失败");
   } finally {
     event.target.value = "";
   }
@@ -982,10 +860,22 @@ function backupPreviewText(nextState, payload, fileName) {
   const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : "未知时间";
   const schema = payload.schemaVersion || nextState.schemaVersion || 1;
   const summary = payload.summary || backupHealthSummary(nextState);
+  const currentProjectIds = new Set((state.projects || []).map((item) => item.id));
+  const nextProjectIds = new Set((nextState.projects || []).map((item) => item.id));
+  const currentTaskIds = new Set((state.tasks || []).map((item) => item.id));
+  const nextTaskIds = new Set((nextState.tasks || []).map((item) => item.id));
+  const currentIssueIds = new Set((state.issues || []).map((item) => item.id));
+  const nextIssueIds = new Set((nextState.issues || []).map((item) => item.id));
+  const diff = [
+    `项目 +${[...nextProjectIds].filter((id) => !currentProjectIds.has(id)).length}/-${[...currentProjectIds].filter((id) => !nextProjectIds.has(id)).length}`,
+    `节点 +${[...nextTaskIds].filter((id) => !currentTaskIds.has(id)).length}/-${[...currentTaskIds].filter((id) => !nextTaskIds.has(id)).length}`,
+    `整改 +${[...nextIssueIds].filter((id) => !currentIssueIds.has(id)).length}/-${[...currentIssueIds].filter((id) => !nextIssueIds.has(id)).length}`
+  ].join("｜");
   return [
     `文件：${fileName}`,
     `导出时间：${exportedAt}`,
     `项目 ${projectCount} 个｜节点 ${taskCount} 条｜整改 ${issueCount} 条｜范围 ${scopeCount} 组`,
+    `恢复差异：${diff}`,
     `健康摘要：${summary}`,
     `数据版本：${schema}`
   ].join("\n");
@@ -1001,26 +891,80 @@ function backupHealthSummary(targetState) {
 
 function renderAuditLogPanel() {
   if (!els.auditLogPanel) return;
-  const logs = (state.auditLogs || []).filter((item) => item.projectId === state.selectedProjectId).slice(0, 12);
-  els.auditLogPanel.innerHTML = `
+  syncAuditFilterControls();
+  const filters = currentAuditFilters();
+  const query = filters.query.toLowerCase();
+  const logs = (state.auditLogs || [])
+    .filter((item) => item.projectId === state.selectedProjectId)
+    .filter((item) => filters.action === "all" || item.action === filters.action)
+    .filter((item) => filters.role === "all" || item.role === filters.role)
+    .filter((item) => {
+      if (!query) return true;
+      return [item.action, item.detail, roleLabel(item.role), item.time].join(" ").toLowerCase().includes(query);
+    })
+    .slice(0, 40);
+  setSafeHtml(els.auditLogPanel, safeTemplateHtml`
     <strong>操作记录</strong>
     <div>
-      ${logs.length ? logs.map((log) => `
+      ${safeListHtml(logs.slice(0, 20), (log) => `
         <article>
           <div>
             <strong>${escapeHtml(log.action)}</strong>
             <small>${new Date(log.time).toLocaleString()}｜${escapeHtml(roleLabel(log.role))}｜${escapeHtml(log.detail || "")}</small>
           </div>
         </article>
-      `).join("") : `<article><div><strong>暂无操作记录</strong><small>新增、编辑、删除、导入和恢复会自动记录。</small></div></article>`}
+      `, `<article><div><strong>暂无操作记录</strong><small>新增、编辑、删除、导入和恢复会自动记录。</small></div></article>`)}
     </div>
-  `;
+  `);
+}
+
+function currentAuditFilters() {
+  return {
+    query: String(els.auditSearchInput?.value || state.uiPreferences?.auditFilters?.query || "").trim(),
+    action: String(els.auditActionFilter?.value || state.uiPreferences?.auditFilters?.action || "all"),
+    role: String(els.auditRoleFilter?.value || state.uiPreferences?.auditFilters?.role || "all")
+  };
+}
+
+function syncAuditFilterControls() {
+  const actions = uniqueSorted((state.auditLogs || [])
+    .filter((item) => item.projectId === state.selectedProjectId)
+    .map((item) => item.action)
+    .filter(Boolean));
+  const filters = state.uiPreferences?.auditFilters || {};
+  if (els.auditActionFilter) {
+    const previous = els.auditActionFilter.value || filters.action || "all";
+    setSafeHtml(els.auditActionFilter, [
+      `<option value="all">全部动作</option>`,
+      ...actions.map((action) => `<option value="${escapeAttr(action)}">${escapeHtml(action)}</option>`)
+    ].join(""));
+    els.auditActionFilter.value = actions.includes(previous) ? previous : "all";
+  }
+  if (els.auditRoleFilter && filters.role) els.auditRoleFilter.value = filters.role;
+  if (els.auditSearchInput && document.activeElement !== els.auditSearchInput) els.auditSearchInput.value = filters.query || "";
+}
+
+function renderPerformancePanel() {
+  if (!els.performancePanel || typeof perfMetrics === "undefined") return;
+  const cacheBuckets = stateCache?.projectItems?.size || 0;
+  const pendingBackend = readPendingBackendAuditQueue().length;
+  setSafeHtml(els.performancePanel, safeTemplateHtml`
+    <div class="health-grid">
+      <article class="ok"><strong>节点</strong><small>${currentProjectItems("tasks").length} 条</small></article>
+      <article class="ok"><strong>整改</strong><small>${currentProjectItems("issues").length} 条</small></article>
+      <article class="ok"><strong>渲染</strong><small>${perfMetrics.lastRenderMs} ms｜${escapeHtml(perfMetrics.lastRenderScope)}</small></article>
+      <article class="ok"><strong>保存</strong><small>${perfMetrics.lastSaveMs} ms</small></article>
+      <article class="ok"><strong>缓存</strong><small>${cacheBuckets} 组｜v${stateCache?.version || 0}</small></article>
+      <article class="${pendingBackend ? "warn" : "ok"}"><strong>审计队列</strong><small>${pendingBackend} 条待同步</small></article>
+      <article class="${backendPageStats ? "ok" : "warn"}"><strong>后端分页</strong><small>${backendPageStats ? `节点 ${backendPageStats.tasks}｜整改 ${backendPageStats.issues}` : "未连接"}</small></article>
+    </div>
+  `);
 }
 
 function renderRestorePointPanel() {
   if (!els.restorePointPanel) return;
   const points = state.restorePoints || [];
-  els.restorePointPanel.innerHTML = `
+  setSafeHtml(els.restorePointPanel, safeTemplateHtml`
     <strong>自动恢复点</strong>
     <div>
       ${points.length ? points.map((point) => `
@@ -1033,7 +977,7 @@ function renderRestorePointPanel() {
         </article>
       `).join("") : `<article><div><strong>暂无恢复点</strong><small>导入、删除和恢复前会自动保存最近 5 次状态。</small></div></article>`}
     </div>
-  `;
+  `);
   els.restorePointPanel.querySelectorAll("[data-restore-point]").forEach((button) => {
     button.addEventListener("click", () => restoreFromPoint(button.dataset.restorePoint));
   });

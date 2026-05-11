@@ -18,16 +18,12 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {}
   }
+  if (typeof renderViewContent === "function") renderViewContent(view);
 
   if (view === "scope") {
     requestAnimationFrame(() => {
-      renderProjectScope();
       if (modelState?.isCanvasModel) scheduleCanvasModelDraw();
     });
-  }
-
-  if (view === "dashboard") {
-    requestAnimationFrame(() => drawChart(currentProjectItems("tasks")));
   }
 
   if (view === "system") {
@@ -51,7 +47,7 @@ function renderTaskScopeFields() {
   const matchedUnit = scope.units.find((unit) => unit.name.includes(discipline));
   const systems = matchedUnit
     ? matchedUnit.systems
-    : scope.units.flatMap((unit) => unit.systems);
+    : scope.units.flatMap((unit) => unit.systems.map((system) => `${unit.name}｜${system}`));
 
   els.taskBuildingSelect.innerHTML = [
     ...scope.buildings.map((building) => `${building.name}（${building.floors}层）`),

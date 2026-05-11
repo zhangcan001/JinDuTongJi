@@ -8,6 +8,14 @@ function notifyUser(message, tone = "warn") {
   window.alert(message);
 }
 
+function userFacingError(error, fallback = "操作失败") {
+  const message = error?.message || fallback;
+  if (message.includes("JSON")) return `${fallback}：文件格式不正确，请确认导入的是系统导出的 JSON 备份。`;
+  if (message.includes("fetch") || message.includes("failed")) return `${fallback}：后端服务暂不可用，请刷新系统状态后重试。`;
+  if (message.includes("quota") || message.includes("存储")) return `${fallback}：浏览器存储空间不足，请先导出备份并清理旧数据。`;
+  return `${fallback}：${message}`;
+}
+
 function confirmAction(message, options = {}) {
   if (!document.body || typeof escapeHtml !== "function") return Promise.resolve(window.confirm(message));
   if (activeConfirmDialog) activeConfirmDialog.remove();

@@ -13,12 +13,18 @@ function createContext() {
     window: {},
     document: { querySelector: () => null, querySelectorAll: () => [] },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    requestAnimationFrame: (callback) => setTimeout(callback, 0),
     stateCache,
+    selectedTaskIds: new Set(),
     taskFilters: { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1, pageSize: 20 },
     invalidateStateCache() {
       stateCache.projectItems = new Map();
       stateCache.version += 1;
-    }
+    },
+    renderSavedTaskViewOptions() {},
+    persistUiPreferences() {},
+    syncTaskFilterControls() {},
+    syncAuditFilterControls() {}
   };
   context.window = context;
   context.globalThis = context;
@@ -37,10 +43,13 @@ const context = createContext();
 loadScripts(context, [
   "js/business-rules.js",
   "js/project-helpers.js",
+  "js/app-core.js",
   "js/data.js",
   "js/validation-schema.js",
   "js/dashboard.js",
   "js/state-import.js",
+  "js/scope-maintenance.js",
+  "js/scope-model.js",
   "js/records-chart.js"
 ]);
 
@@ -50,7 +59,8 @@ vm.runInContext(`
     demoState,
     migrateState,
     currentProjectItems,
-    currentProjectFilteredTasks
+    currentProjectFilteredTasks,
+    avoidLabelOverlap
   };
 `, context);
 
@@ -93,4 +103,45 @@ const results = [1000, 5000, 10000].map((count) => {
   return `${count}:${elapsed.toFixed(1)}ms`;
 });
 
-console.log(`performance checks passed (${results.join(", ")})`);
+function createElementMock() {
+  return {
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    addEventListener() {}
+  };
+}
+
+context.els = {
+  taskTable: createElementMock(),
+  taskCount: createElementMock(),
+  taskColumnToggles: createElementMock(),
+  taskPagination: createElementMock(),
+  selectAllTasks: createElementMock(),
+  bulkTaskToolbar: createElementMock(),
+  bulkTaskSummary: createElementMock(),
+  issueBoard: createElementMock(),
+  issueTaskSelect: createElementMock()
+};
+
+seedTasks(5000);
+context.taskFilters = { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1, pageSize: 120 };
+const renderStarted = performance.now();
+vm.runInContext("renderTasks()", context);
+const renderElapsed = performance.now() - renderStarted;
+assert.ok(renderElapsed < 1000, `Rendering task table took ${renderElapsed.toFixed(1)}ms`);
+assert.ok(context.els.taskTable.innerHTML.includes("性能节点"), "rendered task table should contain seeded rows");
+
+context.modelState = { labelRects: [{ x: 10, y: 10, width: 100, height: 42 }], canvasRect: { width: 120, height: 64 } };
+const labelStarted = performance.now();
+for (let index = 0; index < 200; index += 1) {
+  api.avoidLabelOverlap({ canvas: { getBoundingClientRect: () => ({ width: 120, height: 64 }) } }, 10, 10, 100, 42);
+}
+const labelElapsed = performance.now() - labelStarted;
+assert.ok(labelElapsed < 100, `Model label overlap avoidance took ${labelElapsed.toFixed(1)}ms`);
+
+console.log(`performance checks passed (${results.join(", ")}, render5000:${renderElapsed.toFixed(1)}ms, labels:${labelElapsed.toFixed(1)}ms)`);

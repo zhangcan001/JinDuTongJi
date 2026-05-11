@@ -19,16 +19,16 @@
           const status = getTaskStatus(task);
           return `
             <tr>
-              <td data-col="select"><input type="checkbox" data-select-task="${escapeAttr(task.id)}" ${selectedTaskIds.has(task.id) ? "checked" : ""}></td>
-              <td data-col="name"><strong>${escapeHtml(task.name)}</strong><br><input class="inline-task-field" data-inline-task="${escapeAttr(task.id)}" data-inline-field="note" value="${escapeAttr(task.note || "")}" placeholder="监理意见">${taskAttachmentSummary(task.attachments, task.id)}</td>
-              <td data-col="location"><button class="text-action" type="button" data-locate-task="${escapeAttr(task.id)}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
-              <td data-col="discipline">${escapeHtml(task.discipline)}</td>
-              <td data-col="owner">${escapeHtml(task.owner)}</td>
-              <td data-col="planned"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="planned" value="${escapeAttr(task.planned || "")}"></td>
-              <td data-col="actual"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="actual" value="${escapeAttr(task.actual || "")}"></td>
-              <td data-col="progress"><input class="inline-task-field mini" type="number" min="0" max="100" step="5" data-inline-task="${escapeAttr(task.id)}" data-inline-field="progress" value="${Number(task.progress || 0)}"><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${escapeAttr(task.id)}">0%</button><button data-quick-progress="50" data-task-id="${escapeAttr(task.id)}">50%</button><button data-quick-progress="100" data-task-id="${escapeAttr(task.id)}">100%</button></div></td>
-              <td data-col="status"><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
-              <td data-col="actions">
+              <td data-col="select" data-label="选择"><input type="checkbox" data-select-task="${escapeAttr(task.id)}" ${selectedTaskIds.has(task.id) ? "checked" : ""}></td>
+              <td data-col="name" data-label="节点"><strong>${escapeHtml(task.name)}</strong><br><input class="inline-task-field" data-inline-task="${escapeAttr(task.id)}" data-inline-field="note" value="${escapeAttr(task.note || "")}" placeholder="监理意见">${taskAttachmentSummary(task.attachments, task.id)}</td>
+              <td data-col="location" data-label="部位"><button class="text-action" type="button" data-locate-task="${escapeAttr(task.id)}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
+              <td data-col="discipline" data-label="专业">${escapeHtml(task.discipline)}</td>
+              <td data-col="owner" data-label="责任单位">${escapeHtml(task.owner)}</td>
+              <td data-col="planned" data-label="计划"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="planned" value="${escapeAttr(task.planned || "")}"></td>
+              <td data-col="actual" data-label="实际"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="actual" value="${escapeAttr(task.actual || "")}"></td>
+              <td data-col="progress" data-label="完成率"><input class="inline-task-field mini" type="number" min="0" max="100" step="5" data-inline-task="${escapeAttr(task.id)}" data-inline-field="progress" value="${Number(task.progress || 0)}"><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${escapeAttr(task.id)}">0%</button><button data-quick-progress="50" data-task-id="${escapeAttr(task.id)}">50%</button><button data-quick-progress="100" data-task-id="${escapeAttr(task.id)}">100%</button></div></td>
+              <td data-col="status" data-label="状态"><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
+              <td data-col="actions" data-label="操作">
                 <div class="row-actions">
                   <button class="icon-btn" title="编辑节点" aria-label="编辑节点 ${escapeAttr(task.name || task.system || task.id)}" data-edit-task="${escapeAttr(task.id)}">✎</button>
                   <button class="icon-btn" title="变更历史" aria-label="查看变更历史 ${escapeAttr(task.name || task.system || task.id)}" data-history-task="${escapeAttr(task.id)}">⟲</button>
@@ -368,6 +368,12 @@ async function saveTaskFromForm(event) {
   if (!ensureCanEdit("保存进度节点")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
+  const scopedSystem = splitScopedSystem(data.system);
+  if (scopedSystem.system) data.system = scopedSystem.system;
+  if (scopedSystem.owner && (!data.owner || normalizedOwnerKey(data.owner) !== normalizedOwnerKey(scopedSystem.owner))) {
+    data.owner = scopedSystem.owner;
+    if (form.elements.owner) form.elements.owner.value = scopedSystem.owner;
+  }
   const validation = validateTaskAgainstScope(data);
   if (validation.length) {
     notifyUser(validation.join("\n"));

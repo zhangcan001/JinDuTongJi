@@ -1,0 +1,175 @@
+{
+  "generatedAt": "2026-05-11T16:18:21.435Z",
+  "files": [
+    {
+      "path": "assets/progress-template.xlsx",
+      "bytes": 41418,
+      "hash": "53aa0467fd05282c"
+    },
+    {
+      "path": "index.html",
+      "bytes": 40839,
+      "hash": "8169a89e02d723c1"
+    },
+    {
+      "path": "js/app-core.js",
+      "bytes": 388,
+      "hash": "553089fde356bc3a"
+    },
+    {
+      "path": "js/basement-view.js",
+      "bytes": 1818,
+      "hash": "2b574e93792eae00"
+    },
+    {
+      "path": "js/business-rules.js",
+      "bytes": 3505,
+      "hash": "de61d368a1e67149"
+    },
+    {
+      "path": "js/dashboard.js",
+      "bytes": 21751,
+      "hash": "8b3df12006b24d8b"
+    },
+    {
+      "path": "js/data.js",
+      "bytes": 11347,
+      "hash": "d6d0c7d442f95646"
+    },
+    {
+      "path": "js/dom.js",
+      "bytes": 11598,
+      "hash": "37b9d8ff0b8a8aa8"
+    },
+    {
+      "path": "js/error-reporting.js",
+      "bytes": 1266,
+      "hash": "5d471966fcf6c50f"
+    },
+    {
+      "path": "js/import-apply.js",
+      "bytes": 10797,
+      "hash": "d2ef2367445d3f4f"
+    },
+    {
+      "path": "js/import-excel.js",
+      "bytes": 3689,
+      "hash": "3593bfbe26600e19"
+    },
+    {
+      "path": "js/import-file-reader.js",
+      "bytes": 3229,
+      "hash": "ab87c9e01d158792"
+    },
+    {
+      "path": "js/import-loader.js",
+      "bytes": 2179,
+      "hash": "b5ea2c4e32a8ef94"
+    },
+    {
+      "path": "js/import-normalize.js",
+      "bytes": 8557,
+      "hash": "bdc033b34a6b6f7d"
+    },
+    {
+      "path": "js/import-options.js",
+      "bytes": 1703,
+      "hash": "7b4177505c6438e8"
+    },
+    {
+      "path": "js/import-preview.js",
+      "bytes": 22603,
+      "hash": "9653f8fd1a16b92b"
+    },
+    {
+      "path": "js/import-template.js",
+      "bytes": 15726,
+      "hash": "7a6a9996a57a1b17"
+    },
+    {
+      "path": "js/import-worker.js",
+      "bytes": 1075,
+      "hash": "c090b61d9024e781"
+    },
+    {
+      "path": "js/main.js",
+      "bytes": 31086,
+      "hash": "71369d0036ba29e6"
+    },
+    {
+      "path": "js/progress-chart.js",
+      "bytes": 2513,
+      "hash": "527a2708b6ec11bc"
+    },
+    {
+      "path": "js/project-helpers.js",
+      "bytes": 7588,
+      "hash": "8ec4949d78c3d5f5"
+    },
+    {
+      "path": "js/records-chart.js",
+      "bytes": 38413,
+      "hash": "7169f1449e7b5041"
+    },
+    {
+      "path": "js/scope-maintenance.js",
+      "bytes": 22485,
+      "hash": "af87025522a82fcc"
+    },
+    {
+      "path": "js/scope-model.js",
+      "bytes": 39307,
+      "hash": "5916706de14e5f59"
+    },
+    {
+      "path": "js/state-import.js",
+      "bytes": 25136,
+      "hash": "b0e7227477761a22"
+    },
+    {
+      "path": "js/storage-audit.js",
+      "bytes": 41460,
+      "hash": "cdb9e3003d9c8708"
+    },
+    {
+      "path": "js/storage-core.js",
+      "bytes": 4866,
+      "hash": "1846535f3e1c0983"
+    },
+    {
+      "path": "js/sw-assets.js",
+      "bytes": 939,
+      "hash": "e6a7e3ae16274a98"
+    },
+    {
+      "path": "js/ui-dialogs.js",
+      "bytes": 2898,
+      "hash": "b92b021ce7ac8897"
+    },
+    {
+      "path": "js/validation-schema.js",
+      "bytes": 2936,
+      "hash": "35648f32cdb51e69"
+    },
+    {
+      "path": "js/vendor/xlsx.full.min.js",
+      "bytes": 881727,
+      "hash": "c9506197caf809a0"
+    },
+    {
+      "path": "manifest.json",
+      "bytes": 306,
+      "hash": "f4186785057ede48"
+    },
+    {
+      "path": "styles.css",
+      "bytes": 68505,
+      "hash": "3a1ba84671c29448"
+    },
+    {
+      "path": "sw.js",
+      "bytes": 1768,
+      "hash": "61c0e5ff0ced1b18"
+    }
+  ]
+}

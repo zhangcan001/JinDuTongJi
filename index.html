@@ -349,6 +349,10 @@
                 <button class="ghost-btn" type="button" data-model-view="right">右侧</button>
                 <button class="ghost-btn" type="button" data-model-view="reset">复位</button>
               </div>
+              <label class="inline-toggle">
+                <input id="modelDataOnlyToggle" type="checkbox" />
+                只看有数据楼层
+              </label>
               <button class="primary-btn" id="modelAutoRotateBtn" type="button">自动旋转</button>
               <button class="ghost-btn" id="modelResetFilterBtn" type="button">清除筛选</button>
             </div>
@@ -419,10 +423,35 @@
                 <label class="import-mode-field">
                   导入策略
                   <select id="importModeSelect">
-                    <option value="review">先进入待复核</option>
                     <option value="upsert">更新已有并追加新增</option>
+                    <option value="review">先进入待复核</option>
                     <option value="updateOnly">只更新已有</option>
                     <option value="appendOnly">只追加新增</option>
+                  </select>
+                </label>
+                <label class="import-mode-field">
+                  填充范围
+                  <select id="importScopeSelect">
+                    <option value="current">仅当前项目</option>
+                    <option value="fromFile">按表内项目名称</option>
+                    <option value="currentUnit">仅当前单位权限</option>
+                  </select>
+                </label>
+                <label class="import-mode-field">
+                  更新内容
+                  <select id="importUpdatePolicySelect">
+                    <option value="all">更新全部字段</option>
+                    <option value="progressOnly">仅完成率和实际日期</option>
+                    <option value="planOnly">仅计划日期</option>
+                    <option value="skipBlank">空值不覆盖</option>
+                  </select>
+                </label>
+                <label class="import-mode-field">
+                  重复行
+                  <select id="importDuplicatePolicySelect">
+                    <option value="last">以后出现的行为准</option>
+                    <option value="maxProgress">取最高完成率</option>
+                    <option value="conflict">标记冲突不导入</option>
                   </select>
                 </label>
               </div>
@@ -461,10 +490,11 @@
                 <button class="ghost-btn" id="applyDataFixBtn" type="button">自动修复建议</button>
                 <button class="ghost-btn" id="approveImportsBtn" type="button">确认待复核</button>
               </div>
-              <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。</p>
+              <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。选择文件后会先生成预览，点击“确认导入并同步”后才写入全局进度。</p>
             </div>
             <div class="validation-report" id="importValidationReport"></div>
             <div class="import-diff" id="importDiffPanel"></div>
+            <div class="import-impact" id="importImpactPanel"></div>
             <div class="import-preview" id="importPreviewPanel"></div>
             <div class="baseline-panel" id="baselinePanel"></div>
             <div class="weight-panel" id="weightPanel"></div>
@@ -472,6 +502,20 @@
             <div class="restore-panel" id="restorePointPanel"></div>
             <div class="backend-backup-panel" id="backendBackupPanel"></div>
             <div class="data-health-panel" id="dataHealthPanel"></div>
+            <div class="audit-filter-bar">
+              <input id="auditSearchInput" placeholder="筛选操作记录" />
+              <select id="auditActionFilter">
+                <option value="all">全部动作</option>
+              </select>
+              <select id="auditRoleFilter">
+                <option value="all">全部角色</option>
+                <option value="admin">管理员</option>
+                <option value="pm">项目经理</option>
+                <option value="contractor">施工单位</option>
+                <option value="supervisor">监理</option>
+                <option value="viewer">只读查看</option>
+              </select>
+            </div>
             <div class="audit-panel" id="auditLogPanel"></div>
           </div>
 
@@ -740,6 +784,10 @@
                 <strong>恢复点</strong>
                 <div class="system-card-body" id="systemRestorePanel"></div>
               </article>
+              <article class="system-card">
+                <strong>性能观测</strong>
+                <div class="system-card-body" id="performancePanel"></div>
+              </article>
             </div>
           </section>
         </section>
@@ -782,14 +830,17 @@
     <script src="./js/data.js"></script>
     <script src="./js/business-rules.js"></script>
     <script src="./js/project-helpers.js"></script>
+    <script src="./js/app-core.js"></script>
     <script src="./js/dom.js"></script>
     <script src="./js/validation-schema.js"></script>
     <script src="./js/error-reporting.js"></script>
     <script src="./js/ui-dialogs.js"></script>
+    <script src="./js/storage-core.js"></script>
     <script src="./js/storage-audit.js"></script>
     <script src="./js/state-import.js"></script>
     <script src="./js/import-loader.js"></script>
     <script src="./js/dashboard.js"></script>
+    <script src="./js/scope-maintenance.js"></script>
     <script src="./js/scope-model.js"></script>
     <script src="./js/basement-view.js"></script>
     <script src="./js/progress-chart.js"></script>

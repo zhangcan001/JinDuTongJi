@@ -377,8 +377,7 @@ function createIssuesFromDelayedTasks() {
     });
   });
   recordAudit("自动生成整改提醒", `生成 ${Math.min(50, delayedTasks.length)} 项`);
-  saveState();
-  render();
+  commitStateChange("issues");
   showToast(`已生成 ${Math.min(50, delayedTasks.length)} 条整改提醒`);
 }
 
@@ -415,8 +414,7 @@ async function restoreImportVersion(versionId) {
   state.importVersions = keepVersions;
   state.restorePoints = keepRestorePoints;
   recordAudit("恢复导入版本", version.fileName);
-  saveState();
-  render();
+  commitStateChange("data");
 }
 
 function renderWeightPanel() {
@@ -440,8 +438,7 @@ function renderWeightPanel() {
       if (!ensureCanEdit("调整进度权重")) return;
       state.progressWeights[input.dataset.weightUnit] = Math.max(0, Number(input.value || 1));
       recordAudit("调整进度权重", `${input.dataset.weightUnit}: ${input.value}`);
-      saveState();
-      render();
+      commitStateChange("data");
     });
   });
 }
@@ -506,8 +503,7 @@ function applyDataFixSuggestions() {
     }
   });
   recordAudit("自动修复数据建议", `修复 ${fixed} 处`);
-  saveState();
-  render();
+  commitStateChange("tasks");
   showToast(fixed ? `已自动修复 ${fixed} 处数据` : "未发现可自动修复项", fixed ? "ok" : "warn");
 }
 

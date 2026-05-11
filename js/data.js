@@ -32,6 +32,20 @@ function tableEmptyRowHtml(colspan, title, detail = "") {
   return `<tr><td colspan="${Number(colspan) || 1}">${emptyStateHtml(title, detail)}</td></tr>`;
 }
 
+function safeListHtml(items, renderItem, emptyHtml = "") {
+  const list = Array.isArray(items) ? items : [];
+  return list.length ? list.map(renderItem).join("") : emptyHtml;
+}
+
+function safeTemplateHtml(strings, ...values) {
+  return strings.reduce((html, part, index) => `${html}${part}${values[index] ?? ""}`, "");
+}
+
+function setSafeHtml(element, html) {
+  if (!element) return;
+  element.innerHTML = String(html || "");
+}
+
 const demoState = {
   projects: [
     { id: "p1", name: "城东综合体一期" },

@@ -61,8 +61,12 @@
   redoBtn: document.querySelector("#redoBtn"),
   cleanupDataBtn: document.querySelector("#cleanupDataBtn"),
   importModeSelect: document.querySelector("#importModeSelect"),
+  importScopeSelect: document.querySelector("#importScopeSelect"),
+  importUpdatePolicySelect: document.querySelector("#importUpdatePolicySelect"),
+  importDuplicatePolicySelect: document.querySelector("#importDuplicatePolicySelect"),
   backupInput: document.querySelector("#backupInput"),
   importDiffPanel: document.querySelector("#importDiffPanel"),
+  importImpactPanel: document.querySelector("#importImpactPanel"),
   importPreviewPanel: document.querySelector("#importPreviewPanel"),
   baselinePanel: document.querySelector("#baselinePanel"),
   weightPanel: document.querySelector("#weightPanel"),
@@ -71,10 +75,14 @@
   backendBackupPanel: document.querySelector("#backendBackupPanel"),
   dataHealthPanel: document.querySelector("#dataHealthPanel"),
   auditLogPanel: document.querySelector("#auditLogPanel"),
+  auditSearchInput: document.querySelector("#auditSearchInput"),
+  auditActionFilter: document.querySelector("#auditActionFilter"),
+  auditRoleFilter: document.querySelector("#auditRoleFilter"),
   systemHealthPanel: document.querySelector("#systemHealthPanel"),
   systemBackupPanel: document.querySelector("#systemBackupPanel"),
   systemLogPanel: document.querySelector("#systemLogPanel"),
   systemRestorePanel: document.querySelector("#systemRestorePanel"),
+  performancePanel: document.querySelector("#performancePanel"),
   refreshSystemBtn: document.querySelector("#refreshSystemBtn"),
   runMaintenanceBtn: document.querySelector("#runMaintenanceBtn"),
   taskSearchInput: document.querySelector("#taskSearchInput"),
@@ -112,6 +120,7 @@
   modelUnitFilter: document.querySelector("#modelUnitFilter"),
   modelSystemFilter: document.querySelector("#modelSystemFilter"),
   modelStatusFilter: document.querySelector("#modelStatusFilter"),
+  modelDataOnlyToggle: document.querySelector("#modelDataOnlyToggle"),
   modelAutoRotateBtn: document.querySelector("#modelAutoRotateBtn"),
   modelResetFilterBtn: document.querySelector("#modelResetFilterBtn"),
   modelFloorPanel: document.querySelector("#modelFloorPanel"),
@@ -180,3 +189,15 @@ const taskFilters = {
 };
 let stateCache = { version: 0, projectItems: new Map() };
 let drawModelFrame = null;
+const perfMetrics = {
+  lastRenderMs: 0,
+  lastSaveMs: 0,
+  renderCount: 0,
+  lastRenderScope: "init"
+};
+
+exposeAppApi("els", els);
+exposeAppApi("selectedTaskIds", selectedTaskIds);
+exposeAppApi("taskFilters", taskFilters);
+exposeAppApi("stateCache", stateCache);
+exposeAppApi("perfMetrics", perfMetrics);

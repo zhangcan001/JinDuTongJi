@@ -1,29 +1,7 @@
-const CACHE_NAME = "jindu-local-v3";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./styles.css",
-  "./manifest.json",
-  "./js/data.js",
-  "./js/business-rules.js",
-  "./js/project-helpers.js",
-  "./js/dom.js",
-  "./js/validation-schema.js",
-  "./js/error-reporting.js",
-  "./js/ui-dialogs.js",
-  "./js/storage-audit.js",
-  "./js/state-import.js",
-  "./js/import-loader.js",
-  "./js/import-worker.js",
-  "./js/dashboard.js",
-  "./js/scope-model.js",
-  "./js/basement-view.js",
-  "./js/progress-chart.js",
-  "./js/records-chart.js",
-  "./js/main.js",
-  "./assets/progress-template.xlsx",
-  "./js/vendor/xlsx.full.min.js"
-];
+importScripts("./js/sw-assets.js");
+
+const CACHE_NAME = `jindu-local-${self.JINDU_SW_VERSION || "dev"}`;
+const ASSETS = self.JINDU_SW_ASSETS || ["./", "./index.html"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -48,6 +26,10 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(cacheFirst(event.request));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 async function networkFirst(request, fallbackUrl) {

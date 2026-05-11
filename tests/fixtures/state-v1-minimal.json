@@ -1,0 +1,11 @@
+{
+  "projects": [{ "id": "legacy-p1", "name": "旧版项目" }],
+  "selectedProjectId": "legacy-p1",
+  "projectScopes": {},
+  "tasks": [
+    { "id": "legacy-t1", "projectId": "legacy-p1", "name": "旧版节点", "planned": "2026-05-01", "progress": 35 }
+  ],
+  "issues": [
+    { "id": "legacy-i1", "projectId": "legacy-p1", "title": "旧版整改", "status": "跟踪中", "action": "材料未进场" }
+  ]
+}

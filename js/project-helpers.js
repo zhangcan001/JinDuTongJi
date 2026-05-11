@@ -62,6 +62,26 @@ function normalizedOwnerKey(value) {
   return text || "未填责任单位";
 }
 
+function splitScopedSystem(value) {
+  const text = String(value || "").trim();
+  const separator = text.includes("｜") ? "｜" : text.includes("|") ? "|" : "";
+  if (!separator) return { owner: "", system: text };
+  const [owner, ...rest] = text.split(separator);
+  return { owner: owner.trim(), system: rest.join(separator).trim() };
+}
+
+function taskMatchesScopeUnit(task, unit) {
+  if (!task || !unit) return false;
+  const unitName = String(unit.name || "").trim();
+  const taskOwnerText = String(task.owner || task.discipline || "").trim();
+  if (taskOwnerText) {
+    const taskOwnerKey = normalizedOwnerKey(taskOwnerText);
+    const unitKey = normalizedOwnerKey(unitName);
+    return taskOwnerKey === unitKey || taskOwnerText === unitName || unitName.includes(taskOwnerText);
+  }
+  return Array.isArray(unit.systems) && unit.systems.includes(task.system);
+}
+
 function taskKey(task) {
   if (task.building && task.floor && task.system) {
     return [
@@ -124,6 +144,20 @@ function ensureScopeItems(scope, imported) {
     added += 1;
   }
   return added;
+}
+
+function findScopeUnitForImportedRow(scope, imported) {
+  const discipline = String(imported.discipline || inferDiscipline(imported.owner, imported.system) || "").trim();
+  const owner = String(imported.owner || "").trim();
+  return scope.units.find((unit) => {
+    const unitName = String(unit.name || "").trim();
+    if (!unitName) return false;
+    if (owner && unitName === owner) return true;
+    if (discipline && unitName === discipline) return true;
+    if (discipline && unitName.includes(discipline)) return true;
+    if (owner && unitName.includes(owner)) return true;
+    return false;
+  }) || null;
 }
 
 function inferDiscipline(owner, system) {
