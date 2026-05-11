@@ -1,4 +1,8 @@
 let loadedStateFromLocalStorage = false;
+let pendingLocalStateWriteTimer = null;
+let pendingLocalStateSnapshot = "";
+let undoStack = [];
+let redoStack = [];
 
 function loadState() {
   try {
@@ -13,11 +17,72 @@ function loadState() {
   }
 }
 
-function saveState() {
+function saveState(options = {}) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    pendingLocalStateSnapshot = JSON.stringify(state);
+    if (options.immediate) {
+      flushLocalStateWrite();
+    } else {
+      clearTimeout(pendingLocalStateWriteTimer);
+      pendingLocalStateWriteTimer = setTimeout(flushLocalStateWrite, 120);
+    }
     invalidateStateCache();
     scheduleStateMirrorToIndexedDB();
+  } catch {
+    notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
+  }
+}
+
+function pushUndoSnapshot(reason = "") {
+  const snapshot = cloneData(state);
+  undoStack.push({ id: createId(), reason, time: new Date().toISOString(), state: snapshot });
+  undoStack = undoStack.slice(-20);
+  redoStack = [];
+}
+
+function undoLastStateChange() {
+  if (!undoStack.length) {
+    showToast("没有可撤销的操作", "warn");
+    return;
+  }
+  const currentSnapshot = cloneData(state);
+  const previous = undoStack.pop();
+  redoStack.push({ id: createId(), reason: previous.reason, time: new Date().toISOString(), state: currentSnapshot });
+  redoStack = redoStack.slice(-20);
+  state = migrateState(cloneData(previous.state));
+  recordAudit("撤销操作", previous.reason || "最近一次修改");
+  saveState({ immediate: true });
+  render();
+  showToast("已撤销");
+}
+
+function redoLastStateChange() {
+  if (!redoStack.length) {
+    showToast("没有可重做的操作", "warn");
+    return;
+  }
+  const currentSnapshot = cloneData(state);
+  const next = redoStack.pop();
+  undoStack.push({ id: createId(), reason: next.reason, time: new Date().toISOString(), state: currentSnapshot });
+  undoStack = undoStack.slice(-20);
+  state = migrateState(cloneData(next.state));
+  recordAudit("重做操作", next.reason || "最近一次修改");
+  saveState({ immediate: true });
+  render();
+  showToast("已重做");
+}
+
+function clearRedoHistory() {
+  redoStack = [];
+}
+
+function flushLocalStateWrite() {
+  if (!pendingLocalStateSnapshot) return;
+  clearTimeout(pendingLocalStateWriteTimer);
+  pendingLocalStateWriteTimer = null;
+  try {
+    localStorage.setItem(STORAGE_KEY, pendingLocalStateSnapshot);
+    pendingLocalStateSnapshot = "";
   } catch {
     notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
   }
@@ -36,6 +101,21 @@ function invalidateStateCache() {
   if (!stateCache) return;
   stateCache.version += 1;
   stateCache.projectItems = new Map();
+}
+
+function recordEntityHistory(entityType, entityId, title, changes, summary = "") {
+  state.entityHistory = state.entityHistory || [];
+  state.entityHistory.unshift({
+    id: createId(),
+    projectId: state.selectedProjectId,
+    entityType,
+    entityId,
+    title,
+    changes,
+    summary,
+    time: new Date().toISOString()
+  });
+  state.entityHistory = state.entityHistory.slice(0, 120);
 }
 
 const INDEXED_DB_NAME = "JinDuTongJiDB";
@@ -96,6 +176,8 @@ async function flushStateMirrorToIndexedDB() {
   }
 }
 
+window.addEventListener?.("pagehide", flushLocalStateWrite);
+
 function mirrorStateToIndexedDB() {
   scheduleStateMirrorToIndexedDB();
 }
@@ -141,6 +223,7 @@ function recordAudit(action, detail = "") {
 }
 
 function createRestorePoint(reason) {
+  pushUndoSnapshot(reason);
   state.restorePoints = state.restorePoints || [];
   const snapshot = cloneData(state);
   snapshot.restorePoints = [];
@@ -151,9 +234,74 @@ function createRestorePoint(reason) {
     projectId: state.selectedProjectId,
     taskCount: state.tasks?.length || 0,
     issueCount: state.issues?.length || 0,
+    health: backupHealthSummary(state),
     state: snapshot
   });
-  state.restorePoints = state.restorePoints.slice(0, 5);
+  state.restorePoints = state.restorePoints.slice(0, 14);
+}
+
+function createDailyRestorePointIfNeeded() {
+  state.uiPreferences = state.uiPreferences || {};
+  const todayKey = localDateText(today);
+  if (state.uiPreferences.lastDailyRestorePoint === todayKey) return;
+  createRestorePoint(`每日自动快照 ${todayKey}`);
+  state.uiPreferences.lastDailyRestorePoint = todayKey;
+  saveState({ immediate: true });
+}
+
+function clearOldLocalData() {
+  if (!ensureCanEdit("清理旧数据")) return;
+  state.restorePoints = (state.restorePoints || []).slice(0, 5);
+  state.importVersions = (state.importVersions || []).slice(0, 5);
+  state.auditLogs = (state.auditLogs || []).slice(0, 40);
+  state.entityHistory = (state.entityHistory || []).slice(0, 60);
+  state.projectTemplates = (state.projectTemplates || []).slice(0, 10);
+  clearRedoHistory();
+  recordAudit("清理旧数据", "压缩恢复点、导入版本和历史记录");
+  saveState();
+  render();
+  showToast("旧数据已清理");
+}
+
+function renderEntityHistoryPanel(entityType, entityId, title) {
+  if (!els.detailOverlay || !els.detailOverlayBody || !els.detailOverlayTitle) return;
+  const items = (state.entityHistory || [])
+    .filter((item) => item.projectId === state.selectedProjectId && item.entityType === entityType && item.entityId === entityId)
+    .slice(0, 20);
+  els.detailOverlayTitle.textContent = `${title}变更历史`;
+  els.detailOverlayBody.innerHTML = items.length
+    ? `<div class="history-list">${items.map((item) => `
+        <article class="history-item">
+          <strong>${escapeHtml(item.summary || item.title || "变更记录")}</strong>
+          <small>${new Date(item.time).toLocaleString()}</small>
+          ${item.changes?.length ? `<ul>${item.changes.map((change) => `<li>${escapeHtml(change)}</li>`).join("")}</ul>` : ""}
+        </article>
+      `).join("")}</div>`
+    : `<div class="empty-state"><strong>暂无变更历史</strong><small>该条目还没有可追踪的单条修改记录。</small></div>`;
+  els.detailOverlay.hidden = false;
+}
+
+function renderAttachmentPreview(items, title = "附件预览") {
+  if (!els.detailOverlay || !els.detailOverlayBody || !els.detailOverlayTitle) return;
+  const attachments = (items || []).filter(Boolean);
+  els.detailOverlayTitle.textContent = title;
+  els.detailOverlayBody.innerHTML = attachments.length
+    ? `<div class="detail-gallery">${attachments.map((item) => `
+        <figure>
+          ${String(item.type || "").startsWith("image/") ? `<img src="${escapeAttr(item.dataUrl)}" alt="${escapeAttr(item.name || "附件")}" />` : `<div class="empty-state"><strong>${escapeHtml(item.name || "附件")}</strong><small>${escapeHtml(item.type || "文件")}</small></div>`}
+          <figcaption>
+            <div>${escapeHtml(item.name || "附件")}</div>
+            <small>${Math.round((item.size || 0) / 1024)} KB</small>
+          </figcaption>
+        </figure>
+      `).join("")}</div>`
+    : `<div class="empty-state"><strong>暂无附件</strong></div>`;
+  els.detailOverlay.hidden = false;
+}
+
+function closeDetailOverlay() {
+  if (!els.detailOverlay) return;
+  els.detailOverlay.hidden = true;
 }
 
 async function restoreFromPoint(pointId) {
@@ -174,11 +322,13 @@ async function restoreFromPoint(pointId) {
 }
 
 function exportDataBackup() {
+  const exportedAt = new Date().toISOString();
   const payload = {
     app: "JinDuTongJi",
     version: APP_VERSION,
     schemaVersion: STATE_SCHEMA_VERSION,
-    exportedAt: new Date().toISOString(),
+    exportedAt,
+    summary: backupHealthSummary(state),
     state
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
@@ -188,7 +338,7 @@ function exportDataBackup() {
   link.download = datedFileName("监理进度数据备份", currentProjectName(), "json", today);
   link.click();
   URL.revokeObjectURL(url);
-  state.uiPreferences.lastBackupAt = new Date().toISOString();
+  state.uiPreferences.lastBackupAt = exportedAt;
   saveState();
   showToast("数据备份已导出");
 }
@@ -236,12 +386,22 @@ function backupPreviewText(nextState, payload, fileName) {
   const scopeCount = Object.keys(nextState.projectScopes || {}).length;
   const exportedAt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString() : "未知时间";
   const schema = payload.schemaVersion || nextState.schemaVersion || 1;
+  const summary = payload.summary || backupHealthSummary(nextState);
   return [
     `文件：${fileName}`,
     `导出时间：${exportedAt}`,
     `项目 ${projectCount} 个｜节点 ${taskCount} 条｜整改 ${issueCount} 条｜范围 ${scopeCount} 组`,
+    `健康摘要：${summary}`,
     `数据版本：${schema}`
   ].join("\n");
+}
+
+function backupHealthSummary(targetState) {
+  const projects = targetState.projects?.length || 0;
+  const tasks = targetState.tasks?.length || 0;
+  const issues = targetState.issues?.length || 0;
+  const unfinishedIssues = (targetState.issues || []).filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合").length;
+  return `项目 ${projects} 个，节点 ${tasks} 条，整改 ${issues} 条，未闭合 ${unfinishedIssues} 条`;
 }
 
 function renderAuditLogPanel() {
@@ -272,7 +432,7 @@ function renderRestorePointPanel() {
         <article>
           <div>
             <strong>${escapeHtml(point.reason)}</strong>
-            <small>${new Date(point.createdAt).toLocaleString()}｜节点 ${point.taskCount}｜整改 ${point.issueCount}</small>
+            <small>${new Date(point.createdAt).toLocaleString()}｜节点 ${point.taskCount}｜整改 ${point.issueCount}｜${escapeHtml(point.health || "")}</small>
           </div>
           <button type="button" data-restore-point="${escapeAttr(point.id)}">恢复</button>
         </article>

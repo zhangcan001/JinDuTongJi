@@ -63,6 +63,8 @@ function bindEvents() {
   els.unitScopeForm?.addEventListener("submit", saveScopeUnit);
   els.cancelUnitEditBtn?.addEventListener("click", resetUnitScopeForm);
   els.excelInput.addEventListener("change", importProgressExcel);
+  document.querySelector("#cancelImportParseBtn")?.addEventListener("click", cancelImportParse);
+  els.pasteImportBtn?.addEventListener("click", importPastedTable);
   els.downloadTemplateBtn.addEventListener("click", downloadExcelTemplate);
   els.saveBaselineBtn?.addEventListener("click", savePlanBaseline);
   els.exportDelayBtn?.addEventListener("click", () => exportProjectCsv("滞后清单", "csv", buildDelayExportRows()));
@@ -77,13 +79,27 @@ function bindEvents() {
   els.approveImportsBtn?.addEventListener("click", approvePendingImports);
   els.exportBackupBtn?.addEventListener("click", exportDataBackup);
   els.backupInput?.addEventListener("change", importDataBackup);
+  els.undoBtn?.addEventListener("click", undoLastStateChange);
+  els.redoBtn?.addEventListener("click", redoLastStateChange);
+  els.cleanupDataBtn?.addEventListener("click", clearOldLocalData);
+  els.taskViewSelect?.addEventListener("change", applySavedTaskView);
+  els.saveTaskViewBtn?.addEventListener("click", saveCurrentTaskView);
+  els.clearSavedViewsBtn?.addEventListener("click", clearSavedTaskViews);
+  els.bulkEditOwnerBtn?.addEventListener("click", () => bulkEditSelectedTasks("owner"));
+  els.bulkEditNoteBtn?.addEventListener("click", () => bulkEditSelectedTasks("note"));
+  els.detailOverlayClose?.addEventListener("click", closeDetailOverlay);
+  els.detailOverlay?.addEventListener("click", (event) => {
+    if (event.target === els.detailOverlay) closeDetailOverlay();
+  });
   els.officeModeBtn?.addEventListener("click", toggleOfficeMode);
   els.projectAdminForm?.addEventListener("submit", saveProjectFromForm);
   els.cancelProjectEditBtn?.addEventListener("click", resetProjectForm);
+  els.saveProjectTemplateBtn?.addEventListener("click", saveCurrentProjectTemplate);
 
   [
     els.taskSearchInput,
     els.taskStatusFilter,
+    els.taskSmartFilter,
     els.taskBuildingFilter,
     els.taskOwnerFilter,
     els.taskSortSelect
@@ -93,13 +109,15 @@ function bindEvents() {
   });
 
   els.taskFilterResetBtn?.addEventListener("click", () => {
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     renderTasks();
     persistUiPreferences();
   });
   els.selectAllTasks?.addEventListener("change", toggleSelectPageTasks);
   els.taskTable?.addEventListener("change", handleTaskTableChange);
+  els.taskTable?.addEventListener("focusout", handleTaskTableFocusOut);
   els.taskTable?.addEventListener("click", handleTaskTableClick);
+  els.taskColumnToggles?.addEventListener("change", handleTaskColumnToggle);
   els.taskPagination?.addEventListener("click", handleTaskPaginationClick);
   els.issueBoard?.addEventListener("click", handleIssueBoardClick);
   els.bulkTaskToolbar?.querySelectorAll("[data-bulk-progress]").forEach((button) => {
@@ -164,8 +182,35 @@ function bindEvents() {
   els.carouselExitBtn?.addEventListener("click", stopDashboardCarousel);
 
   document.addEventListener("keydown", (event) => {
+    const isTypingTarget = ["INPUT", "TEXTAREA", "SELECT"].includes(event.target?.tagName) || event.target?.isContentEditable;
     if (event.key === "Escape" && document.body.classList.contains("carousel-mode")) {
       stopDashboardCarousel();
+      return;
+    }
+    if (event.key === "Escape" && els.detailOverlay && !els.detailOverlay.hidden) {
+      closeDetailOverlay();
+      return;
+    }
+    if (event.key === "Escape") {
+      if (els.taskForm && els.taskSubmitBtn?.textContent === "保存节点") resetTaskForm();
+      if (els.issueForm && els.issueSubmitBtn?.textContent === "保存整改项") resetIssueForm();
+    }
+    if (!isTypingTarget && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) redoLastStateChange();
+      else undoLastStateChange();
+      return;
+    }
+    if (!isTypingTarget && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redoLastStateChange();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      const activeView = document.querySelector(".nav-item.active")?.dataset.view;
+      if (activeView === "schedule" && els.taskForm) els.taskForm.requestSubmit();
+      if (activeView === "issues" && els.issueForm) els.issueForm.requestSubmit();
     }
   });
 
@@ -175,7 +220,7 @@ function bindEvents() {
     selectedModelFloor = "";
     lastImportFocus = null;
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     saveState();
     render();
     renderImportPreview(null);
@@ -190,7 +235,7 @@ function bindEvents() {
     state.restorePoints = keepRestorePoints;
     recordAudit("恢复示例数据", "重置为内置示例");
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     saveState();
     render();
     renderImportPreview(null);
@@ -227,14 +272,34 @@ function render() {
   renderAuditLogPanel();
 }
 
-function renderDataPanels() {
+function renderDataPanels(scope = "data") {
+  if (scope === "tasks") {
+    renderTasks();
+    renderDashboard();
+    renderProjectScope();
+    renderDataHealthPanel();
+    renderAuditLogPanel();
+    return;
+  }
+  if (scope === "issues") {
+    renderIssues();
+    renderDashboard();
+    renderDataHealthPanel();
+    renderAuditLogPanel();
+    return;
+  }
+  if (scope === "scope") {
+    renderProjectScope();
+    renderTasks();
+    renderDashboard();
+    renderDataHealthPanel();
+    renderAuditLogPanel();
+    return;
+  }
   renderDashboard();
   renderTasks();
   renderIssues();
   renderProjectScope();
-  renderBaselinePanel();
-  renderWeightPanel();
-  renderRestorePointPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
 }
@@ -266,19 +331,24 @@ function renderSearchResultsForActiveView() {
 }
 
 function commitStateChange(refresh = "all") {
-  saveState();
+  saveState({ immediate: refresh !== "prefs" });
   if (refresh === "data") {
-    renderDataPanels();
+    renderDataPanels("data");
     return;
   }
   if (refresh === "tasks") {
-    renderTasks();
-    renderDashboard();
-    renderProjectScope();
-    renderDataHealthPanel();
-    renderAuditLogPanel();
+    renderDataPanels("tasks");
     return;
   }
+  if (refresh === "issues") {
+    renderDataPanels("issues");
+    return;
+  }
+  if (refresh === "scope") {
+    renderDataPanels("scope");
+    return;
+  }
+  if (refresh === "prefs") return;
   render();
 }
 
@@ -299,6 +369,87 @@ function restoreUiPreferences() {
   if (state.uiPreferences?.officeMode) document.body.classList.add("office-mode");
 }
 
+function taskViewSignature(filters) {
+  return JSON.stringify({
+    query: String(filters?.query || ""),
+    status: String(filters?.status || "all"),
+    building: String(filters?.building || "all"),
+    owner: String(filters?.owner || "all"),
+    smart: String(filters?.smart || "all"),
+    sort: String(filters?.sort || "plannedAsc"),
+    pageSize: Number(filters?.pageSize || 120)
+  });
+}
+
+function renderSavedTaskViewOptions() {
+  if (!els.taskViewSelect) return;
+  state.uiPreferences = state.uiPreferences || {};
+  const views = state.uiPreferences.savedTaskViews || [];
+  const currentSignature = taskViewSignature(taskFilters);
+  const matchedView = views.find((view) => taskViewSignature(view.filters) === currentSignature);
+  els.taskViewSelect.innerHTML = [
+    `<option value="">${views.length ? "选择已保存视图" : "暂无已保存视图"}</option>`,
+    ...views.map((view) => `<option value="${escapeAttr(view.id)}">${escapeHtml(view.name)}</option>`)
+  ].join("");
+  els.taskViewSelect.value = matchedView?.id || "";
+}
+
+function saveCurrentTaskView() {
+  state.uiPreferences = state.uiPreferences || {};
+  const name = String(window.prompt("请输入视图名称", "当前筛选视图") || "").trim();
+  if (!name) return;
+  const nextView = {
+    id: createId(),
+    name,
+    filters: {
+      query: taskFilters.query,
+      status: taskFilters.status,
+      building: taskFilters.building,
+      owner: taskFilters.owner,
+      smart: taskFilters.smart,
+      sort: taskFilters.sort,
+      pageSize: taskFilters.pageSize
+    },
+    createdAt: new Date().toISOString()
+  };
+  const views = (state.uiPreferences.savedTaskViews || []).filter((view) => view.name !== name);
+  state.uiPreferences.savedTaskViews = [nextView, ...views].slice(0, 10);
+  recordAudit("保存筛选视图", name);
+  saveState();
+  render();
+  showToast("筛选视图已保存");
+}
+
+function applySavedTaskView(event) {
+  const viewId = event?.target?.value || els.taskViewSelect?.value || "";
+  if (!viewId) return;
+  const view = (state.uiPreferences?.savedTaskViews || []).find((item) => item.id === viewId);
+  if (!view) return;
+  Object.assign(taskFilters, {
+    query: view.filters?.query || "",
+    status: view.filters?.status || "all",
+    building: view.filters?.building || "all",
+    owner: view.filters?.owner || "all",
+    smart: view.filters?.smart || "all",
+    sort: view.filters?.sort || "plannedAsc",
+    page: 1,
+    pageSize: view.filters?.pageSize || 120
+  });
+  persistUiPreferences();
+  recordAudit("应用筛选视图", view.name);
+  render();
+}
+
+async function clearSavedTaskViews() {
+  if (!state.uiPreferences?.savedTaskViews?.length) return showToast("没有可清理的视图", "warn");
+  if (!(await confirmAction("确定清理所有已保存的筛选视图吗？", { title: "清理保存视图", okText: "清理" }))) return;
+  state.uiPreferences.savedTaskViews = [];
+  recordAudit("清理筛选视图", "全部删除");
+  saveState();
+  render();
+  showToast("已清理保存视图");
+}
+
 function toggleOfficeMode() {
   state.uiPreferences.officeMode = !state.uiPreferences.officeMode;
   recordAudit("切换显示模式", state.uiPreferences.officeMode ? "办公模式" : "大屏模式");
@@ -316,8 +467,14 @@ function renderProjectAdmin() {
       ...state.projects.map((project) => `<option value="${escapeAttr(project.id)}">${escapeHtml(project.name)}</option>`)
     ].join("");
   }
+  if (els.projectTemplateSelect) {
+    els.projectTemplateSelect.innerHTML = [
+      `<option value="">不使用模板</option>`,
+      ...(state.projectTemplates || []).map((template) => `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name)}</option>`)
+    ].join("");
+  }
   if (els.projectAdminSummary) {
-    els.projectAdminSummary.textContent = `${state.projects.length - archived.size} 个启用｜${archived.size} 个归档`;
+    els.projectAdminSummary.textContent = `${state.projects.length - archived.size} 个启用｜${archived.size} 个归档｜${(state.projectTemplates || []).length} 个模板`;
   }
   els.projectAdminList.innerHTML = state.projects.map((project) => `
     <article class="${archived.has(project.id) ? "archived" : ""}">
@@ -362,9 +519,13 @@ function saveProjectFromForm(event) {
   } else {
     const project = { id: `p-${Date.now()}`, name };
     state.projects.push(project);
-    state.projectScopes[project.id] = data.copyFrom && state.projectScopes[data.copyFrom]
+    const template = (state.projectTemplates || []).find((item) => item.id === data.templateId);
+    state.projectScopes[project.id] = template?.scope
+      ? cloneData(template.scope)
+      : data.copyFrom && state.projectScopes[data.copyFrom]
       ? cloneData(state.projectScopes[data.copyFrom])
       : { basement: "", buildings: [], units: [] };
+    if (template?.progressWeights) state.progressWeights = cloneData(template.progressWeights);
     state.selectedProjectId = project.id;
     recordAudit("新增项目", name);
   }
@@ -388,6 +549,25 @@ function resetProjectForm() {
   if (els.projectAdminForm?.elements.id) els.projectAdminForm.elements.id.value = "";
   if (els.projectSubmitBtn) els.projectSubmitBtn.textContent = "新增项目";
   els.cancelProjectEditBtn?.classList.remove("show");
+}
+
+function saveCurrentProjectTemplate() {
+  if (!ensureCanEdit("保存项目模板")) return;
+  const projectName = currentProjectName();
+  const scope = cloneData(currentProjectScope());
+  const template = {
+    id: createId(),
+    name: `${projectName}模板`,
+    projectId: state.selectedProjectId,
+    scope,
+    progressWeights: cloneData(state.progressWeights || {}),
+    createdAt: new Date().toISOString()
+  };
+  state.projectTemplates = [template, ...(state.projectTemplates || []).filter((item) => item.name !== template.name)].slice(0, 10);
+  recordAudit("保存项目模板", template.name);
+  saveState();
+  render();
+  showToast("项目模板已保存");
 }
 
 function toggleProjectArchive(projectId) {
@@ -437,6 +617,7 @@ document.addEventListener("visibilitychange", () => {
 restoreUiPreferences();
 bindEvents();
 setDefaultDates();
+initializeLocalOnlyFeatures();
 render();
 if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
 hydrateStateFromIndexedDB().then((restored) => {
@@ -446,4 +627,14 @@ hydrateStateFromIndexedDB().then((restored) => {
   if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
   showToast("已从 IndexedDB 恢复本地数据");
 });
+
+function initializeLocalOnlyFeatures() {
+  createDailyRestorePointIfNeeded();
+  registerServiceWorker();
+}
+
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
 

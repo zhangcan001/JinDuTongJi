@@ -1,5 +1,9 @@
 const MAX_IMPORT_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_IMPORT_ROWS = 10000;
+let activeImportWorker = null;
+let activeImportReject = null;
+let importCancelled = false;
+let importBusy = false;
 
 async function importProgressExcel(event) {
   const file = event.target.files[0];
@@ -12,21 +16,60 @@ async function importProgressExcel(event) {
   }
 
   try {
+    importCancelled = false;
+    setImportBusy(true, "正在读取导入文件");
     const rows = await parseImportFileRows(file);
+    if (importCancelled) return;
+    updateImportProgress("正在校验字段和范围");
     if (rows.length > MAX_IMPORT_ROWS) {
       throw new Error(`本次文件包含 ${rows.length} 行，超过 ${MAX_IMPORT_ROWS} 行上限，请拆分后导入`);
     }
     const validation = validateImportRows(rows);
+    updateImportProgress("正在生成导入预览");
     const preview = previewImportedRows(validation.validRows);
     pendingImport = { fileName: file.name, rows, validation, preview };
     els.importResult.textContent = `已解析 ${rows.length} 行：可导入 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行；预计新增 ${preview.created} 个节点，更新 ${preview.updated} 个节点。`;
     renderImportValidation(validation);
     renderImportPreview(pendingImport);
   } catch (error) {
-    els.importResult.textContent = `导入失败：${error.message || "请检查表头和文件格式"}`;
+    els.importResult.textContent = error?.name === "AbortError" ? "已取消本次导入。" : `导入失败：${error.message || "请检查表头和文件格式"}`;
   } finally {
+    setImportBusy(false);
     event.target.value = "";
   }
+}
+
+function setImportBusy(isBusy, message = "") {
+  importBusy = isBusy;
+  if (els.excelInput) els.excelInput.disabled = isBusy;
+  const cancelButton = document.querySelector("#cancelImportParseBtn");
+  if (cancelButton) cancelButton.hidden = !isBusy;
+  if (message) updateImportProgress(message);
+}
+
+function updateImportProgress(message) {
+  if (!els.importResult || !message) return;
+  els.importResult.textContent = message;
+}
+
+function cancelActiveImportWorker() {
+  if (!activeImportWorker) return;
+  activeImportWorker.terminate();
+  activeImportWorker = null;
+  if (activeImportReject) {
+    const error = new Error("导入已取消");
+    error.name = "AbortError";
+    activeImportReject(error);
+    activeImportReject = null;
+  }
+}
+
+function cancelImportParse() {
+  if (!importBusy) return;
+  importCancelled = true;
+  cancelActiveImportWorker();
+  setImportBusy(false);
+  els.importResult.textContent = "已取消本次导入。";
 }
 
 function isImportFileTooLarge(file) {
@@ -444,16 +487,16 @@ function importResultDetail(type, task) {
 }
 
 function normalizeImportRow(row) {
-  const completionStatus = pickCell(row, ["实际完成情况", "完成情况", "施工状态"]);
+  const completionStatus = pickCell(row, ["实际完成情况", "完成情况", "施工状态", "状态"]);
   const statusProgress = completionStatusToProgress(completionStatus);
   const elevatorProgress = normalizePercent(pickCell(row, ["完成百分比", "完成率"]));
-  const owner = pickCell(row, ["责任单位", "施工单位", "单位", "参建单位"]) || pickCell(row, ["来源工作表"]);
-  const discipline = pickCell(row, ["专业", "专业/分部", "分部", "单位类型"]);
-  const system = pickCell(row, ["施工内容", "系统", "系统名称", "工作内容"]) || (String(owner).includes("电梯") ? "设备安装" : "");
-  const building = pickCell(row, ["施工部位", "部位", "楼栋", "楼号", "单体"]);
-  const floor = pickCell(row, ["楼层", "层数", "施工楼层"]) || (String(owner).includes("电梯") ? "整栋" : "");
+  const owner = pickCell(row, ["责任单位", "施工单位", "单位", "参建单位", "分包单位"]) || pickCell(row, ["来源工作表"]);
+  const discipline = pickCell(row, ["专业", "专业/分部", "分部", "单位类型", "工种"]);
+  const system = pickCell(row, ["施工内容", "系统", "系统名称", "工作内容", "任务内容"]) || (String(owner).includes("电梯") ? "设备安装" : "");
+  const building = pickCell(row, ["施工部位", "部位", "楼栋", "楼号", "单体", "栋号"]);
+  const floor = pickCell(row, ["楼层", "层数", "施工楼层", "部位层"]) || (String(owner).includes("电梯") ? "整栋" : "");
   return {
-    projectName: pickCell(row, ["项目", "项目名称", "工程名称"]),
+    projectName: pickCell(row, ["项目", "项目名称", "工程名称", "标段"]),
     building,
     floor,
     discipline,
@@ -861,10 +904,63 @@ function exportImportErrors() {
     问题: item.problems.join("、"),
     楼栋: item.normalized?.building || "",
     楼层: item.normalized?.floor || "",
-    施工内容: item.normalized?.system || item.normalized?.name || ""
+    专业: item.normalized?.discipline || "",
+    责任单位: item.normalized?.owner || "",
+    施工内容: item.normalized?.system || item.normalized?.name || "",
+    计划完成: item.normalized?.planned || "",
+    实际完成: item.normalized?.actual || "",
+    完成率: item.normalized?.progress ?? ""
   }));
   exportProjectCsv("导入错误行", "csv", rows);
+  exportProjectCsv("导入错误修正模板", "csv", buildImportCorrectionRows(rows));
   showToast("错误行已导出");
+}
+
+function buildImportCorrectionRows(rows) {
+  return rows.map((row) => ({
+    项目: currentProjectName(),
+    楼栋: row.楼栋,
+    楼层: row.楼层,
+    专业: row.专业,
+    责任单位: row.责任单位,
+    施工内容: row.施工内容,
+    计划完成时间: row.计划完成,
+    实际完成情况: row.完成率 ? (Number(row.完成率) >= 100 ? "已完成" : Number(row.完成率) > 0 ? "施工中" : "未开始") : "未开始",
+    备注: row.问题
+  }));
+}
+
+function importPastedTable() {
+  if (!els.pasteImportText) return;
+  const text = els.pasteImportText.value.trim();
+  if (!text) {
+    showToast("请先粘贴表格内容", "warn");
+    return;
+  }
+  const rows = parsePastedTableRows(text);
+  pendingImport = {
+    fileName: "粘贴数据",
+    rows,
+    validation: validateImportRows(rows),
+    preview: previewImportedRows(validateImportRows(rows).validRows)
+  };
+  els.importResult.textContent = `已解析粘贴数据 ${rows.length} 行`;
+  renderImportValidation(pendingImport.validation);
+  renderImportPreview(pendingImport);
+}
+
+function parsePastedTableRows(text) {
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const cells = lines.map((line) => line.split(/\t|,/).map((cell) => cell.trim()));
+  const headers = cells.shift() || [];
+  return cells.map((values) => {
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header] = values[index] || "";
+    });
+    return row;
+  });
 }
 
 function approvePendingImports() {

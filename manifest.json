@@ -1,0 +1,11 @@
+{
+  "name": "监理进度管控台",
+  "short_name": "进度管控",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#07111f",
+  "theme_color": "#0b1728",
+  "lang": "zh-CN",
+  "description": "本地单人使用的工程进度、整改和周报管控台"
+}

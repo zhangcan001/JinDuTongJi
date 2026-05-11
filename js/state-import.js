@@ -61,10 +61,11 @@ function currentProjectFilteredTasks(tasks, filters = taskFilters) {
     filters.status || "all",
     filters.building || "all",
     filters.owner || "all",
+    filters.smart || "all",
     filters.sort || "plannedAsc"
   ].join(":");
   if (!stateCache.projectItems.has(cacheKey)) {
-    const query = String(filters.query || "").toLowerCase();
+    const queryTokens = String(filters.query || "").toLowerCase().split(/\s+/).filter(Boolean);
     const filtered = tasks
       .filter((task) => {
         const status = getTaskStatus(task).className;
@@ -80,16 +81,28 @@ function currentProjectFilteredTasks(tasks, filters = taskFilters) {
           task.planned,
           task.actual
         ].join(" ").toLowerCase();
-        if (query && !haystack.includes(query)) return false;
+        if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
         if (filters.status !== "all" && status !== filters.status) return false;
         if (filters.building !== "all" && building !== filters.building) return false;
         if (filters.owner !== "all" && (task.owner || task.discipline || "未填单位") !== filters.owner) return false;
+        if (!taskMatchesSmartFilter(task, filters.smart || "all")) return false;
         return true;
       })
       .sort(compareTasksByFilter);
     stateCache.projectItems.set(cacheKey, filtered);
   }
   return stateCache.projectItems.get(cacheKey);
+}
+
+function taskMatchesSmartFilter(task, smart) {
+  if (smart === "today") {
+    const due = String(task.planned || "");
+    return due && due <= localDateText(today) && getTaskStatus(task).className !== "done";
+  }
+  if (smart === "missingPlan") return !task.planned;
+  if (smart === "missingNote") return !String(task.note || "").trim();
+  if (smart === "conflict") return (task.actual && Number(task.progress || 0) < 100) || (Number(task.progress || 0) >= 100 && !task.actual);
+  return true;
 }
 
 function currentProjectScope() {
@@ -114,11 +127,14 @@ function migrateState(nextState) {
   nextState.importVersions = nextState.importVersions || [];
   nextState.pendingImports = nextState.pendingImports || [];
   nextState.archivedProjectIds = nextState.archivedProjectIds || [];
+  nextState.projectTemplates = nextState.projectTemplates || [];
+  nextState.entityHistory = nextState.entityHistory || [];
   nextState.uiPreferences = {
     activeView: "dashboard",
     officeMode: false,
     taskFilters: {},
     modelFilters: {},
+    savedTaskViews: [],
     lastBackupAt: "",
     dashboardCards: ["today", "ops", "weekly", "chart", "analytics"],
     ...(nextState.uiPreferences || {})
@@ -150,8 +166,15 @@ function migrateState(nextState) {
     nextState.tasks.forEach((task) => {
       task.owner = task.owner || task.discipline || "未填责任单位";
       task.progress = clampProgress(task.progress);
+      task.attachments = Array.isArray(task.attachments) ? task.attachments : [];
     });
   }
+  nextState.tasks.forEach((task) => {
+    task.attachments = Array.isArray(task.attachments) ? task.attachments : [];
+  });
+  nextState.issues.forEach((issue) => {
+    issue.attachments = Array.isArray(issue.attachments) ? issue.attachments : [];
+  });
   invalidateStateCache();
   return nextState;
 }
@@ -214,7 +237,8 @@ function buildTaskExportRows(tasks) {
     完成率: task.progress || 0,
     状态: getTaskStatus(task).label,
     滞后原因: classifyDelayReason(`${task.note || ""}${task.name || ""}`),
-    监理意见: task.note || ""
+    监理意见: task.note || "",
+    附件数: Array.isArray(task.attachments) ? task.attachments.length : 0
   }));
 }
 
@@ -259,14 +283,15 @@ function buildIssueExportRows() {
       复验结果: issue.reviewResult || "",
       监理要求: issue.action || "",
       复验意见: issue.reviewNote || "",
-      闭合日期: issue.closedAt || ""
+      闭合日期: issue.closedAt || "",
+      附件数: Array.isArray(issue.attachments) ? issue.attachments.length : 0
     };
   });
 }
 
 function exportWeeklyReportFile() {
   const report = els.weeklyReportOutput?.value || generateWeeklyReport();
-  const html = `<!doctype html><html><head><meta charset="UTF-8"><title>监理周报</title><style>body{font-family:"Microsoft YaHei",Arial,sans-serif;line-height:1.8;color:#111827;padding:40px;}h1{text-align:center;font-size:24px;}pre{white-space:pre-wrap;font:inherit;} .meta{text-align:right;color:#6b7280;}</style></head><body><h1>${escapeHtml(currentProjectName())}监理周报</h1><div class="meta">${localDateText(today)}</div><pre>${escapeHtml(report)}</pre></body></html>`;
+  const html = `<!doctype html><html><head><meta charset="UTF-8"><title>监理周报</title><style>body{font-family:"Microsoft YaHei",Arial,sans-serif;line-height:1.8;color:#111827;padding:40px;}h1{text-align:center;font-size:24px;margin:0 0 12px;} .meta{display:flex;justify-content:space-between;color:#6b7280;font-size:13px;margin-bottom:20px;padding-bottom:8px;border-bottom:1px solid #d1d5db;} pre{white-space:pre-wrap;font:inherit;margin:0;} .footer{margin-top:24px;font-size:12px;color:#6b7280;text-align:right;}</style></head><body><h1>${escapeHtml(currentProjectName())}监理周报</h1><div class="meta"><span>生成时间：${new Date().toLocaleString()}</span><span>项目节点 ${currentProjectItems("tasks").length} 条｜整改 ${currentProjectItems("issues").length} 条</span></div><pre>${escapeHtml(report)}</pre><div class="footer">本周报由本地管控台自动生成</div></body></html>`;
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -281,7 +306,8 @@ function exportRectificationNotice() {
   const issues = currentProjectItems("issues").filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合");
   const lines = [
     `${currentProjectName()}整改通知单`,
-    `签发日期：${localDateText(today)}`,
+    `签发日期：${new Date().toLocaleString()}`,
+    `问题总数：${issues.length} 项`,
     "",
     "请相关责任单位对以下问题限期整改，并在整改完成后提交复验申请：",
     "",
@@ -294,7 +320,9 @@ function exportRectificationNotice() {
       issue.delayReason ? `延期原因：${issue.delayReason}` : "",
       ""
     ].filter(Boolean).join("\n")) : ["当前无未闭合整改项。"]),
-    "监理单位意见：请施工单位明确责任人、资源投入和完成时间，逾期未完成的纳入例会重点督办。"
+    "监理单位意见：请施工单位明确责任人、资源投入和完成时间，逾期未完成的纳入例会重点督办。",
+    "",
+    "附件说明：可在节点或整改项中补充现场照片，便于留痕和复验。"
   ].join("\n");
   const blob = new Blob([lines], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -478,6 +506,10 @@ function buildDataHealthReport() {
   const duplicates = [];
   const missingPlan = [];
   const missingLocation = [];
+  const missingOwner = [];
+  const missingSystem = [];
+  const completedWithoutActual = [];
+  const invalidFloorLabels = [];
   const floorOverflow = [];
   const progressConflicts = [];
 
@@ -487,6 +519,10 @@ function buildDataHealthReport() {
     else seen.set(key, task);
     if (!task.planned) missingPlan.push(task.name || task.system || "-");
     if (!task.building || !task.floor) missingLocation.push(task.name || task.system || "-");
+    if (!String(task.owner || "").trim()) missingOwner.push(task.name || task.system || "-");
+    if (!String(task.system || "").trim()) missingSystem.push(task.name || task.building || "-");
+    if (Number(task.progress || 0) >= 100 && !task.actual) completedWithoutActual.push(task.name || task.system || "-");
+    if (task.floor && !/^\d+层$|^地下\d+层$|^整栋$/.test(String(task.floor).trim())) invalidFloorLabels.push(`${task.building || "-"}｜${task.floor}｜${task.system || task.name}`);
     const building = scope.buildings.find((item) => String(task.building || "").includes(item.name));
     const floor = parseFloorNumber(task.floor);
     if (building && floor && floor > Number(building.floors || 1)) {
@@ -501,6 +537,10 @@ function buildDataHealthReport() {
     { title: "重复节点", items: duplicates },
     { title: "缺少计划时间", items: missingPlan },
     { title: "缺少楼栋/楼层", items: missingLocation },
+    { title: "缺少责任单位", items: missingOwner },
+    { title: "缺少施工内容", items: missingSystem },
+    { title: "已完成无实际日期", items: completedWithoutActual },
+    { title: "楼层写法不统一", items: invalidFloorLabels },
     { title: "楼层超范围", items: floorOverflow },
     { title: "进度状态冲突", items: progressConflicts }
   ];

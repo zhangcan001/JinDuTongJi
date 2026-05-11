@@ -24,6 +24,14 @@ function escapeAttr(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
 }
 
+function emptyStateHtml(title, detail = "", className = "empty-state") {
+  return `<div class="${escapeAttr(className)}"><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ""}</div>`;
+}
+
+function tableEmptyRowHtml(colspan, title, detail = "") {
+  return `<tr><td colspan="${Number(colspan) || 1}">${emptyStateHtml(title, detail)}</td></tr>`;
+}
+
 const demoState = {
   projects: [
     { id: "p1", name: "城东综合体一期" },

@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>监理进度管控台</title>
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#0b1728" />
     <link rel="stylesheet" href="./styles.css" />
-    <script src="./js/vendor/xlsx.full.min.js" defer></script>
   </head>
   <body>
     <div class="app-shell">
@@ -222,9 +223,14 @@
                 复制范围自
                 <select name="copyFrom" id="projectCopyFromSelect"></select>
               </label>
+              <label>
+                项目模板
+                <select name="templateId" id="projectTemplateSelect"></select>
+              </label>
               <div class="form-actions">
                 <button class="primary-btn" type="submit" id="projectSubmitBtn">新增项目</button>
                 <button class="ghost-btn" type="button" id="cancelProjectEditBtn">取消编辑</button>
+                <button class="ghost-btn" type="button" id="saveProjectTemplateBtn">保存模板</button>
               </div>
             </form>
             <div class="project-admin-list" id="projectAdminList"></div>
@@ -394,6 +400,9 @@
                   <input id="excelInput" type="file" accept=".xlsx,.xls,.csv" />
                 </label>
                 <button class="ghost-btn" id="downloadTemplateBtn" type="button">下载多表模板</button>
+                <button class="ghost-btn" id="cancelImportParseBtn" type="button" hidden>取消导入</button>
+                <textarea id="pasteImportText" rows="3" placeholder="也可直接粘贴 Excel 表格区域"></textarea>
+                <button class="ghost-btn" id="pasteImportBtn" type="button">预览粘贴数据</button>
                 <label class="import-mode-field">
                   导入策略
                   <select id="importModeSelect">
@@ -418,6 +427,9 @@
                 <strong>数据安全</strong>
                 <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
                 <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
+                <button class="ghost-btn" id="undoBtn" type="button">撤销</button>
+                <button class="ghost-btn" id="redoBtn" type="button">重做</button>
+                <button class="ghost-btn" id="cleanupDataBtn" type="button">清理旧数据</button>
                 <label class="ghost-btn import-backup">
                   恢复备份
                   <input id="backupInput" type="file" accept=".json,application/json" />
@@ -498,6 +510,13 @@
                 监理意见
                 <textarea name="note" rows="2" placeholder="记录偏差原因、要求施工单位采取的纠偏措施"></textarea>
               </label>
+              <label class="full">
+                附件/照片
+                <input name="taskAttachments" id="taskAttachmentInput" type="file" accept="image/*,.pdf" multiple />
+              </label>
+              <label>
+                <input name="continueAdd" type="checkbox" /> 连续新增
+              </label>
               <div class="form-actions full">
                 <button class="primary-btn" type="submit" id="taskSubmitBtn">添加节点</button>
                 <button class="ghost-btn" type="button" id="cancelTaskEditBtn">取消编辑</button>
@@ -526,6 +545,16 @@
                 </select>
               </label>
               <label>
+                常用视图
+                <select id="taskSmartFilter">
+                  <option value="all">全部节点</option>
+                  <option value="today">今天要处理</option>
+                  <option value="missingPlan">缺计划日期</option>
+                  <option value="missingNote">缺监理意见</option>
+                  <option value="conflict">进度冲突</option>
+                </select>
+              </label>
+              <label>
                 楼栋
                 <select id="taskBuildingFilter"></select>
               </label>
@@ -544,6 +573,15 @@
               </label>
               <button class="ghost-btn" id="taskFilterResetBtn" type="button">清除筛选</button>
             </div>
+            <div class="view-save-bar">
+              <label>
+                保存的视图
+                <select id="taskViewSelect"></select>
+              </label>
+              <button class="ghost-btn" type="button" id="saveTaskViewBtn">保存当前筛选</button>
+              <button class="ghost-btn" type="button" id="clearSavedViewsBtn">清理视图</button>
+            </div>
+            <div class="column-toggle-bar" id="taskColumnToggles" aria-label="台账列显示"></div>
             <div class="bulk-toolbar" id="bulkTaskToolbar">
               <label><input type="checkbox" id="selectAllTasks" /> 选择本页</label>
               <span id="bulkTaskSummary">已选 0 项</span>
@@ -552,22 +590,24 @@
               <button class="ghost-btn" type="button" data-bulk-progress="100">设为100%</button>
               <button class="ghost-btn" type="button" id="bulkIssueBtn">批量生成整改</button>
               <button class="ghost-btn" type="button" id="bulkExportBtn">导出选中</button>
+              <button class="ghost-btn" type="button" id="bulkEditOwnerBtn">批量改单位</button>
+              <button class="ghost-btn" type="button" id="bulkEditNoteBtn">批量改意见</button>
               <button class="ghost-btn danger-action" type="button" id="bulkDeleteBtn">批量删除</button>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>选择</th>
-                    <th>节点</th>
-                    <th>部位/楼层/内容</th>
-                    <th>专业</th>
-                    <th>责任单位</th>
-                    <th>计划</th>
-                    <th>实际</th>
-                    <th>完成率</th>
-                    <th>状态</th>
-                    <th></th>
+                    <th data-col="select">选择</th>
+                    <th data-col="name">节点</th>
+                    <th data-col="location">部位/楼层/内容</th>
+                    <th data-col="discipline">专业</th>
+                    <th data-col="owner">责任单位</th>
+                    <th data-col="planned">计划</th>
+                    <th data-col="actual">实际</th>
+                    <th data-col="progress">完成率</th>
+                    <th data-col="status">状态</th>
+                    <th data-col="actions"></th>
                   </tr>
                 </thead>
                 <tbody id="taskTable"></tbody>
@@ -638,6 +678,10 @@
                 复验意见
                 <textarea name="reviewNote" rows="2" placeholder="记录复验情况、是否同意闭合、仍需整改事项"></textarea>
               </label>
+              <label class="full">
+                附件/照片
+                <input name="issueAttachments" id="issueAttachmentInput" type="file" accept="image/*,.pdf" multiple />
+              </label>
               <div class="form-actions full">
                 <button class="primary-btn" type="submit" id="issueSubmitBtn">添加整改项</button>
                 <button class="ghost-btn" type="button" id="exportNoticeBtn">导出整改通知单</button>
@@ -651,6 +695,15 @@
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="detail-overlay" id="detailOverlay" hidden>
+      <section class="detail-dialog" role="dialog" aria-modal="true" aria-labelledby="detailOverlayTitle">
+        <div class="detail-dialog-head">
+          <h2 id="detailOverlayTitle">详情</h2>
+          <button class="icon-btn" type="button" id="detailOverlayClose" aria-label="关闭详情">×</button>
+        </div>
+        <div class="detail-dialog-body" id="detailOverlayBody"></div>
+      </section>
+    </div>
     <button class="carousel-exit-btn" id="carouselExitBtn" type="button">退出轮播</button>
 
     <script src="./js/data.js"></script>
