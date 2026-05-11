@@ -109,6 +109,11 @@ function validateImportRows(rows) {
       if (Number.isNaN(elevatorCount) || Number.isNaN(installedCount)) problems.push("电梯数量和已安装数量必须为数字");
       if (elevatorCount && installedCount > elevatorCount) problems.push("已安装数量不能大于电梯数量");
     }
+    if (normalized.planned && !isDateField(normalized.planned)) problems.push("计划完成时间格式不正确");
+    if (normalized.actual && !isDateField(normalized.actual)) problems.push("实际完成时间格式不正确");
+    const normalizedProgress = Number(String(normalized.progress || 0).replace("%", ""));
+    if (!Number.isFinite(normalizedProgress) || normalizedProgress < 0 || normalizedProgress > 100) problems.push("完成率必须在 0-100 之间");
+    if (normalized.actual && normalizedProgress < 100) problems.push("已填实际完成时间时完成率应为 100%");
 
     const buildingMatched = normalized.building.includes("地下")
       || knownBuildings.some((building) => normalized.building.includes(building));
@@ -354,9 +359,8 @@ function confirmPendingImport() {
   }
   recordImportHistory(result, fileName);
   recordAudit(mode === "review" ? "导入待复核数据" : "导入进度数据", `${fileName}：新增 ${result.created} 项，更新 ${result.updated} 项，跳过 ${result.skipped} 项`);
-  saveState();
   pendingImport = null;
-  render();
+  commitStateChange("data");
   els.importResult.textContent = mode === "review"
     ? `已进入待复核 ${result.created} 行：请点击“确认待复核”后计入正式进度。`
     : `已导入 ${rows.length} 行：成功 ${validation.validRows.length} 行，失败 ${validation.invalidRows.length} 行；新增 ${result.created} 个节点，更新 ${result.updated} 个节点，跳过 ${result.skipped} 个节点。`;
@@ -539,49 +543,24 @@ function pickCell(row, names) {
 }
 
 function downloadExcelTemplate() {
-  const headers = ["楼栋", "楼层", "专业", "施工内容", "计划完成时间", "实际完成情况"];
-  const scope = currentProjectScope();
-  const units = scope.units.length ? scope.units : [{ name: "施工单位", code: "UNIT", systems: ["施工内容"] }];
-
-  if (!window.XLSX) {
-    const csv = [headers, ...buildUnitTemplateRows(units[0], scope).slice(0, 8)]
-      .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "进度导入模板.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-    return;
-  }
-
-  const guideRows = [
-    ["填报说明"],
-    ["1. 每个施工单位只填写自己对应的工作表。"],
-    ["2. 表头不要删除或改名，导入时会按表头识别字段。"],
-    ["3. 施工部位建议使用项目范围中的楼栋名称，如 A1（6层）或地下室一层。"],
-    ["4. 楼层填写如 3层、地下1层；完成率填写 0-100。"],
-    ["5. 完成率为 100% 时建议同步填写实际完成日期。"],
-    [],
-    ["当前项目", currentProjectName()],
-    ["导出日期", localDateText(today)]
-  ];
-  const sheets = [{ name: "填报说明", rows: guideRows, widths: [28, 60] }];
-  const usedNames = new Set(["填报说明"]);
-  units.forEach((unit) => {
-    const unitHeaders = isElevatorUnit(unit) ? ["楼栋", "专业", "电梯数量", "已安装数量", "完成百分比"] : headers;
-    const rows = [unitHeaders, ...(isElevatorUnit(unit) ? buildElevatorTemplateRows(unit, scope) : buildUnitTemplateRows(unit, scope))];
-    sheets.push({
-      name: uniqueSheetName(unit.name, usedNames),
-      rows,
-      widths: unitHeaders.map((header) => Math.max(12, header.length * 2 + 4)),
-      validationRange: isElevatorUnit(unit) ? "" : `F2:F${Math.max(2, rows.length)}`
+  const templateUrl = "./assets/progress-template.xlsx";
+  const fileName = `进度导入模板-${currentProjectName()}-${localDateText(today)}.xlsx`;
+  fetch(templateUrl)
+    .then((response) => {
+      if (!response.ok) throw new Error(`模板文件加载失败：${response.status}`);
+      return response.blob();
+    })
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(() => {
+      els.importResult.textContent = "模板下载失败，请确认 assets/progress-template.xlsx 是否存在。";
     });
-  });
-
-  exportTemplateWorkbook(sheets, `进度导入模板-${currentProjectName()}-${localDateText(today)}.xlsx`);
 }
 
 function isElevatorUnit(unit) {
@@ -986,7 +965,6 @@ function approvePendingImports() {
   });
   state.pendingImports = (state.pendingImports || []).filter((item) => item.projectId !== state.selectedProjectId);
   recordAudit("确认待复核导入", `新增 ${created}，更新 ${updated}`);
-  saveState();
-  render();
+  commitStateChange("data");
   showToast(`待复核已确认：新增 ${created}，更新 ${updated}`);
 }

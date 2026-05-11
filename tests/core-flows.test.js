@@ -42,6 +42,7 @@ loadScripts(context, [
   "js/business-rules.js",
   "js/project-helpers.js",
   "js/data.js",
+  "js/validation-schema.js",
   "js/dashboard.js",
   "js/state-import.js",
   "js/storage-audit.js",
@@ -252,6 +253,7 @@ async function runAsyncChecks() {
     "js/business-rules.js",
     "js/project-helpers.js",
     "js/data.js",
+    "js/validation-schema.js",
     "js/dashboard.js",
     "js/state-import.js",
     "js/storage-audit.js"

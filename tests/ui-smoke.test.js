@@ -53,7 +53,7 @@ async function launchBrowser() {
   const { port } = server.address();
   browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "networkidle" });
+  await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "load" });
 
   await page.waitForSelector("#pageTitle");
   assert.equal(await page.textContent("#pageTitle"), "总览");
@@ -120,6 +120,10 @@ async function launchBrowser() {
   await page.click('[data-view="issues"]');
   await page.waitForSelector("#issueBoard");
   assert.equal(await page.locator("#issueBoard").isVisible(), true);
+
+  await page.click('[data-view="system"]');
+  await page.waitForSelector("#systemView.active");
+  assert.equal(await page.locator("#systemHealthPanel").isVisible(), true);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.click('[data-view="dashboard"]');

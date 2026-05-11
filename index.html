@@ -24,6 +24,7 @@
           <button class="nav-item" data-view="scope">项目部位</button>
           <button class="nav-item" data-view="schedule">计划节点</button>
           <button class="nav-item" data-view="issues">滞后与整改</button>
+          <button class="nav-item" data-view="system">系统设置</button>
         </nav>
       </aside>
 
@@ -56,6 +57,18 @@
               项目
               <select id="projectFilter" aria-label="选择项目"></select>
             </label>
+            <div class="save-status" id="saveStatus" data-tone="idle" role="status" aria-live="polite">
+              <span></span>
+              <strong>本地数据库</strong>
+              <small>等待同步</small>
+            </div>
+            <div class="auth-status" id="authStatus" aria-live="polite">
+              <span></span>
+              <strong id="authStatusTitle">未登录</strong>
+              <small id="authStatusText">仅可查看</small>
+            </div>
+            <button class="ghost-btn" id="loginBtn" type="button">登录</button>
+            <button class="ghost-btn" id="logoutBtn" type="button" hidden>退出</button>
             <button class="ghost-btn" id="officeModeBtn" type="button">办公模式</button>
             <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
           </div>
@@ -427,12 +440,19 @@
                 <strong>数据安全</strong>
                 <button class="ghost-btn" id="saveBaselineBtn" type="button">保存计划基线</button>
                 <button class="ghost-btn" id="exportBackupBtn" type="button">备份数据</button>
+                <button class="ghost-btn" id="backendBackupBtn" type="button">数据库备份</button>
+                <button class="ghost-btn" id="backendExportJsonBtn" type="button">导出数据库JSON</button>
+                <button class="ghost-btn" id="backendExportSqliteBtn" type="button">导出SQLite</button>
                 <button class="ghost-btn" id="undoBtn" type="button">撤销</button>
                 <button class="ghost-btn" id="redoBtn" type="button">重做</button>
                 <button class="ghost-btn" id="cleanupDataBtn" type="button">清理旧数据</button>
                 <label class="ghost-btn import-backup">
                   恢复备份
                   <input id="backupInput" type="file" accept=".json,application/json" />
+                </label>
+                <label class="ghost-btn import-backup">
+                  导入数据库JSON
+                  <input id="backendImportJsonInput" type="file" accept=".json,application/json" />
                 </label>
               </div>
               <div class="import-group">
@@ -450,6 +470,7 @@
             <div class="weight-panel" id="weightPanel"></div>
             <div class="import-version-panel" id="importVersionPanel"></div>
             <div class="restore-panel" id="restorePointPanel"></div>
+            <div class="backend-backup-panel" id="backendBackupPanel"></div>
             <div class="data-health-panel" id="dataHealthPanel"></div>
             <div class="audit-panel" id="auditLogPanel"></div>
           </div>
@@ -692,6 +713,37 @@
           <div class="issue-board" id="issueBoard"></div>
         </section>
 
+        <section class="view" id="systemView">
+          <section class="panel system-panel">
+            <div class="panel-heading">
+              <h2>系统设置</h2>
+              <span>数据库、备份、日志、维护</span>
+            </div>
+            <div class="system-grid">
+              <article class="system-card">
+                <strong>数据库状态</strong>
+                <div class="system-card-body" id="systemHealthPanel"></div>
+                <div class="form-actions">
+                  <button class="ghost-btn" id="refreshSystemBtn" type="button">刷新状态</button>
+                  <button class="ghost-btn" id="runMaintenanceBtn" type="button">执行维护</button>
+                </div>
+              </article>
+              <article class="system-card">
+                <strong>备份与版本</strong>
+                <div class="system-card-body" id="systemBackupPanel"></div>
+              </article>
+              <article class="system-card">
+                <strong>日志</strong>
+                <div class="system-card-body log-panel" id="systemLogPanel"></div>
+              </article>
+              <article class="system-card">
+                <strong>恢复点</strong>
+                <div class="system-card-body" id="systemRestorePanel"></div>
+              </article>
+            </div>
+          </section>
+        </section>
+
       </main>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -704,17 +756,39 @@
         <div class="detail-dialog-body" id="detailOverlayBody"></div>
       </section>
     </div>
+    <div class="detail-overlay" id="loginOverlay" hidden>
+      <section class="detail-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="loginDialogTitle">
+        <div class="detail-dialog-head">
+          <h2 id="loginDialogTitle">系统登录</h2>
+          <button class="icon-btn" type="button" id="loginOverlayClose" aria-label="关闭登录">×</button>
+        </div>
+        <div class="detail-dialog-body">
+          <form id="loginForm" class="auth-form">
+            <label>
+              管理员密码
+              <input type="password" name="password" autocomplete="current-password" placeholder="请输入本机管理员密码" />
+            </label>
+            <p class="auth-hint" id="authHint">登录后可写入数据库并同步操作审计。</p>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit" id="loginSubmitBtn">登录</button>
+              <button class="ghost-btn" type="button" id="logoutFromDialogBtn">退出登录</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </div>
     <button class="carousel-exit-btn" id="carouselExitBtn" type="button">退出轮播</button>
 
     <script src="./js/data.js"></script>
     <script src="./js/business-rules.js"></script>
     <script src="./js/project-helpers.js"></script>
     <script src="./js/dom.js"></script>
+    <script src="./js/validation-schema.js"></script>
+    <script src="./js/error-reporting.js"></script>
     <script src="./js/ui-dialogs.js"></script>
     <script src="./js/storage-audit.js"></script>
     <script src="./js/state-import.js"></script>
-    <script src="./js/import-file-reader.js"></script>
-    <script src="./js/import-excel.js"></script>
+    <script src="./js/import-loader.js"></script>
     <script src="./js/dashboard.js"></script>
     <script src="./js/scope-model.js"></script>
     <script src="./js/basement-view.js"></script>

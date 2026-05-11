@@ -3,6 +3,7 @@ function currentRole() {
 }
 
 function canEditData() {
+  if (backendAuthState?.enabled && !backendAuthState.authenticated) return false;
   return currentRole() !== "viewer";
 }
 
@@ -18,6 +19,10 @@ function roleLabel(role = currentRole()) {
 
 function ensureCanEdit(action = "执行此操作") {
   if (canEditData()) return true;
+  if (backendAuthState?.enabled && !backendAuthState.authenticated) {
+    showAuthPrompt(`请先登录后再${action}。`);
+    return false;
+  }
   notifyUser(`当前为只读查看角色，不能${action}。`);
   return false;
 }
@@ -448,9 +453,12 @@ function renderDataHealthPanel() {
   const backupText = state.uiPreferences?.lastBackupAt
     ? `上次备份 ${new Date(state.uiPreferences.lastBackupAt).toLocaleString()}`
     : "尚未导出过完整备份";
+  const backendText = backendHealth
+    ? `数据库 v${backendHealth.version || 0}｜备份 ${backendHealth.backups || 0}｜${backendHealth.ok ? "健康" : "需检查"}`
+    : "数据库状态读取中";
   els.dataHealthPanel.innerHTML = `
     <strong>数据体检</strong>
-    <p>${report.summary}｜待复核 ${pending.length} 条｜${backupText}</p>
+    <p>${report.summary}｜待复核 ${pending.length} 条｜${backupText}｜${backendText}</p>
     <div class="health-grid">
       ${report.sections.map((section) => `
         <article class="${section.items.length ? "warn" : "ok"}">
@@ -464,6 +472,10 @@ function renderDataHealthPanel() {
       `).join("")}
     </div>
   `;
+  refreshBackendHealth().then((health) => {
+    if (!health || backendText.includes(`v${health.version || 0}`)) return;
+    renderDataHealthPanel();
+  });
 }
 
 function applyDataFixSuggestions() {

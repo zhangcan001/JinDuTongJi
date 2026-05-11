@@ -3,6 +3,22 @@ let pendingLocalStateWriteTimer = null;
 let pendingLocalStateSnapshot = "";
 let undoStack = [];
 let redoStack = [];
+let backendStateLoaded = false;
+let pendingBackendStateWriteTimer = null;
+let pendingBackendStateSnapshot = null;
+let backendStateVersion = 0;
+let backendSaveStatusTimer = null;
+let backendBackups = [];
+let backendHealth = null;
+let backendRetryTimer = null;
+let backendRetryAttempt = 0;
+let backendSaveInFlight = false;
+let pendingBackendAuditQueue = [];
+let backendApiUnavailable = false;
+let backendAuthState = { enabled: false, authenticated: false, loading: true };
+
+const BACKEND_PENDING_STATE_KEY = `${STORAGE_KEY}:pending-backend-state`;
+const BACKEND_PENDING_AUDIT_KEY = `${STORAGE_KEY}:pending-backend-audit`;
 
 function loadState() {
   try {
@@ -28,6 +44,7 @@ function saveState(options = {}) {
     }
     invalidateStateCache();
     scheduleStateMirrorToIndexedDB();
+    scheduleStateMirrorToBackend(options);
   } catch {
     notifyUser("本地存储空间不足，当前修改可能无法保存。建议先导出节点台账或清理浏览器存储。");
   }
@@ -177,6 +194,9 @@ async function flushStateMirrorToIndexedDB() {
 }
 
 window.addEventListener?.("pagehide", flushLocalStateWrite);
+window.addEventListener?.("pagehide", flushStateMirrorToBackend);
+window.addEventListener?.("pagehide", flushBackendAuditQueue);
+window.addEventListener?.("online", resumePendingBackendWork);
 
 function mirrorStateToIndexedDB() {
   scheduleStateMirrorToIndexedDB();
@@ -209,17 +229,592 @@ async function hydrateStateFromIndexedDB() {
   return true;
 }
 
+function canUseBackendState() {
+  return !backendApiUnavailable && (location.protocol === "http:" || location.protocol === "https:");
+}
+
+function scheduleStateMirrorToBackend(options = {}) {
+  if (!canUseBackendState()) return;
+  pendingBackendStateSnapshot = cloneData(state);
+  persistPendingBackendState(pendingBackendStateSnapshot);
+  clearTimeout(pendingBackendStateWriteTimer);
+  clearTimeout(backendRetryTimer);
+  if (!backendCanWrite()) {
+    updateBackendSaveStatus("idle", "未登录");
+    return;
+  }
+  updateBackendSaveStatus("saving", "保存中");
+  if (options.immediate) {
+    flushStateMirrorToBackend();
+  } else {
+    pendingBackendStateWriteTimer = setTimeout(flushStateMirrorToBackend, 500);
+  }
+}
+
+async function flushStateMirrorToBackend() {
+  if (backendSaveInFlight) return false;
+  const snapshot = pendingBackendStateSnapshot || readPendingBackendState();
+  pendingBackendStateSnapshot = null;
+  clearTimeout(pendingBackendStateWriteTimer);
+  pendingBackendStateWriteTimer = null;
+  if (!snapshot || !canUseBackendState()) return false;
+  if (!backendCanWrite()) {
+    updateBackendSaveStatus("idle", "未登录");
+    showAuthPrompt("请先登录后再同步到本机数据库。");
+    pendingBackendStateSnapshot = snapshot;
+    persistPendingBackendState(snapshot);
+    return false;
+  }
+  backendSaveInFlight = true;
+  try {
+    const response = await fetch("./api/state", {
+      method: "PUT",
+      headers: backendJsonHeaders(),
+      body: JSON.stringify({ state: snapshot, baseVersion: backendStateVersion }),
+      keepalive: true
+    });
+    if (response.status === 409) {
+      const payload = await response.json().catch(() => ({}));
+      backendStateVersion = Number(payload.currentVersion || backendStateVersion);
+      updateBackendSaveStatus("error", "保存冲突");
+      notifyUser("数据库已有新版本，请刷新页面后再继续编辑。", "warn");
+      return false;
+    }
+    if (response.status === 403) {
+      updateBackendSaveStatus("error", "角色受限");
+      notifyUser("当前角色无权写入后端数据库，修改已保存在浏览器本地。", "warn");
+      pendingBackendStateSnapshot = snapshot;
+      persistPendingBackendState(snapshot);
+      return false;
+    }
+    if (response.status === 401) {
+      backendAuthState = { enabled: true, authenticated: false, loading: false };
+      updateAuthUi();
+      updateBackendSaveStatus("error", "未登录");
+      showAuthPrompt("请先登录后再同步到本机数据库。");
+      pendingBackendStateSnapshot = snapshot;
+      persistPendingBackendState(snapshot);
+      return false;
+    }
+    if (response.status === 404) {
+      markBackendApiUnavailable();
+      return false;
+    }
+    if (!response.ok) throw new Error("backend save failed");
+    const payload = await response.json().catch(() => ({}));
+    backendStateVersion = Number(payload.version || backendStateVersion);
+    backendRetryAttempt = 0;
+    clearPendingBackendState();
+    state.uiPreferences = state.uiPreferences || {};
+    state.uiPreferences.lastBackendSaveAt = payload.updatedAt || new Date().toISOString();
+    updateBackendSaveStatus("saved", "已保存");
+    flushBackendAuditQueue();
+    return true;
+  } catch {
+    pendingBackendStateSnapshot = snapshot;
+    persistPendingBackendState(snapshot);
+    scheduleBackendRetry();
+    updateBackendSaveStatus("error", `待重试 ${pendingBackendStateLabel()}`);
+    notifyUser("后端数据库保存失败，已加入自动重试队列。", "warn");
+    return false;
+  } finally {
+    backendSaveInFlight = false;
+  }
+}
+
+function persistPendingBackendState(snapshot) {
+  try {
+    localStorage.setItem(BACKEND_PENDING_STATE_KEY, JSON.stringify({
+      savedAt: new Date().toISOString(),
+      baseVersion: backendStateVersion,
+      state: snapshot
+    }));
+  } catch {
+    // 本地状态本身已经保存过；队列写入失败时保持内存重试。
+  }
+}
+
+function readPendingBackendState() {
+  try {
+    const payload = JSON.parse(localStorage.getItem(BACKEND_PENDING_STATE_KEY) || "null");
+    if (!payload?.state || !Array.isArray(payload.state.projects) || !Array.isArray(payload.state.tasks)) return null;
+    if (Number.isFinite(Number(payload.baseVersion))) backendStateVersion = Number(payload.baseVersion);
+    return migrateState(cloneData(payload.state));
+  } catch {
+    localStorage.removeItem(BACKEND_PENDING_STATE_KEY);
+    return null;
+  }
+}
+
+function clearPendingBackendState() {
+  localStorage.removeItem(BACKEND_PENDING_STATE_KEY);
+}
+
+function pendingBackendStateLabel() {
+  const snapshot = pendingBackendStateSnapshot || readPendingBackendState();
+  if (!snapshot) return "";
+  const tasks = snapshot.tasks?.length || 0;
+  return `(${tasks} 条节点)`;
+}
+
+function scheduleBackendRetry() {
+  if (!canUseBackendState()) return;
+  clearTimeout(backendRetryTimer);
+  backendRetryAttempt = Math.min(backendRetryAttempt + 1, 6);
+  const delay = Math.min(30000, 1000 * (2 ** (backendRetryAttempt - 1)));
+  backendRetryTimer = setTimeout(flushStateMirrorToBackend, delay);
+}
+
+function markBackendApiUnavailable() {
+  backendApiUnavailable = true;
+  pendingBackendStateSnapshot = null;
+  clearTimeout(pendingBackendStateWriteTimer);
+  clearTimeout(backendRetryTimer);
+  clearPendingBackendState();
+  localStorage.removeItem(BACKEND_PENDING_AUDIT_KEY);
+  updateBackendSaveStatus("idle", "本地模式");
+}
+
+function resumePendingBackendWork() {
+  if (!canUseBackendState()) return;
+  const snapshot = readPendingBackendState();
+  if (snapshot) {
+    updateBackendSaveStatus("saving", "补交中");
+    pendingBackendStateSnapshot = snapshot;
+    scheduleBackendRetry();
+  }
+  pendingBackendAuditQueue = readPendingBackendAuditQueue();
+  if (pendingBackendAuditQueue.length) flushBackendAuditQueue();
+}
+
+function backendJsonHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  const token = localStorage.getItem("jindu-auth-token");
+  if (token) headers["X-Jindu-Token"] = token;
+  headers["X-Jindu-Actor"] = currentRole();
+  return headers;
+}
+
+async function readStateFromBackend() {
+  if (!canUseBackendState()) return null;
+  try {
+    const response = await fetch("./api/state", { cache: "no-store" });
+    if (response.status === 404) {
+      markBackendApiUnavailable();
+      return null;
+    }
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (!payload?.state || !Array.isArray(payload.state.projects) || !Array.isArray(payload.state.tasks)) return null;
+    backendStateVersion = Number(payload.version || 0);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+async function hydrateStateFromBackend() {
+  const payload = await readStateFromBackend();
+  if (!payload?.state) {
+    await migrateLocalStateToBackendIfNeeded();
+    return false;
+  }
+  const localStamp = state.uiPreferences?.lastBackendSaveAt || "";
+  if (loadedStateFromLocalStorage && localStamp && payload.updatedAt && localStamp >= payload.updatedAt) {
+    backendStateLoaded = true;
+    return false;
+  }
+  state = migrateState(cloneData(payload.state));
+  backendStateVersion = Number(payload.version || 0);
+  backendStateLoaded = true;
+  pendingLocalStateSnapshot = JSON.stringify(state);
+  flushLocalStateWrite();
+  mirrorStateToIndexedDB();
+  await refreshAuthState();
+  updateBackendSaveStatus("saved", "已连接");
+  return true;
+}
+
+async function migrateLocalStateToBackendIfNeeded() {
+  if (!loadedStateFromLocalStorage || !canUseBackendState() || state.uiPreferences?.backendMigratedAt) return false;
+  const validationReady = Array.isArray(state.projects) && Array.isArray(state.tasks);
+  if (!validationReady) return false;
+  await refreshAuthState();
+  if (!backendCanWrite()) {
+    showAuthPrompt("请先登录后再把浏览器旧数据迁移到本机数据库。");
+    return false;
+  }
+  state.uiPreferences = state.uiPreferences || {};
+  state.uiPreferences.backendMigratedAt = new Date().toISOString();
+  pendingBackendStateSnapshot = cloneData(state);
+  persistPendingBackendState(pendingBackendStateSnapshot);
+  const saved = await flushStateMirrorToBackend();
+  if (saved) {
+    recordAudit("迁移浏览器旧数据", "已首次写入本地数据库");
+    showToast("已把浏览器旧数据迁移到本地数据库");
+  }
+  return saved;
+}
+
+function updateBackendSaveStatus(tone, text) {
+  if (!els.saveStatus) return;
+  els.saveStatus.dataset.tone = tone;
+  const label = els.saveStatus.querySelector("small");
+  if (label) label.textContent = text;
+  clearTimeout(backendSaveStatusTimer);
+  if (tone === "saved") {
+    backendSaveStatusTimer = setTimeout(() => {
+      if (els.saveStatus?.dataset.tone === "saved" && label) label.textContent = "已保存";
+    }, 1800);
+  }
+}
+
+async function refreshBackendHealth() {
+  if (!canUseBackendState()) return null;
+  try {
+    const response = await fetch("./api/health", { cache: "no-store" });
+    if (!response.ok) return null;
+    backendHealth = await response.json();
+    return backendHealth;
+  } catch {
+    backendHealth = null;
+    return null;
+  }
+}
+
+async function fetchBackendBackups() {
+  if (!canUseBackendState()) return [];
+  try {
+    const response = await fetch("./api/backups", { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    backendBackups = payload.backups || [];
+    return backendBackups;
+  } catch {
+    backendBackups = [];
+    return backendBackups;
+  }
+}
+
+async function fetchBackendVersions() {
+  if (!canUseBackendState()) return [];
+  try {
+    const response = await fetch("./api/versions", { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    const versions = payload.versions || [];
+    if (state?.uiPreferences) state.uiPreferences.systemVersions = versions;
+    return versions;
+  } catch {
+    return [];
+  }
+}
+
+async function fetchBackendLogs() {
+  if (!canUseBackendState()) return [];
+  try {
+    const response = await fetch("./api/logs", { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload = await response.json();
+    const lines = payload.lines || [];
+    if (state?.uiPreferences) state.uiPreferences.systemLogs = lines;
+    return lines;
+  } catch {
+    return [];
+  }
+}
+
+async function refreshAuthState() {
+  if (!canUseBackendState()) {
+    backendAuthState = { enabled: false, authenticated: false, loading: false };
+    updateAuthUi();
+    return backendAuthState;
+  }
+  backendAuthState = { ...backendAuthState, loading: true };
+  updateAuthUi();
+  try {
+    const response = await fetch("./api/auth/status", { cache: "no-store" });
+    if (!response.ok) throw new Error("status failed");
+    backendAuthState = { ...(await response.json()), loading: false };
+  } catch {
+    backendAuthState = { enabled: false, authenticated: false, loading: false };
+  }
+  updateAuthUi();
+  return backendAuthState;
+}
+
+async function loginWithPassword(password) {
+  const response = await fetch("./api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "登录失败");
+  }
+  backendAuthState = { enabled: true, authenticated: true, loading: false };
+  updateAuthUi();
+  resumePendingBackendWork();
+  return true;
+}
+
+async function logoutBackendSession() {
+  if (!canUseBackendState()) return false;
+  await fetch("./api/auth/logout", { method: "POST" }).catch(() => {});
+  backendAuthState = { enabled: true, authenticated: false, loading: false };
+  updateAuthUi();
+  return true;
+}
+
+function backendCanWrite() {
+  if (backendAuthState.loading) return false;
+  return !backendAuthState.enabled || backendAuthState.authenticated;
+}
+
+function updateAuthUi() {
+  if (els.authStatusTitle) {
+    els.authStatusTitle.textContent = backendAuthState.loading ? "认证中" : backendAuthState.enabled ? (backendAuthState.authenticated ? "已登录" : "未登录") : "本地模式";
+  }
+  if (els.authStatusText) {
+    els.authStatusText.textContent = backendAuthState.loading ? "正在检查登录状态" : backendAuthState.enabled ? (backendAuthState.authenticated ? "可写入数据库" : "仅可查看") : "无需登录";
+  }
+  if (els.loginBtn) els.loginBtn.hidden = backendAuthState.loading ? false : backendAuthState.enabled && backendAuthState.authenticated;
+  if (els.logoutBtn) els.logoutBtn.hidden = !(backendAuthState.enabled && backendAuthState.authenticated);
+  if (els.authStatus) els.authStatus.dataset.tone = backendAuthState.loading ? "saving" : backendAuthState.enabled ? (backendAuthState.authenticated ? "saved" : "error") : "idle";
+}
+
+function showAuthPrompt(message = "") {
+  if (els.loginOverlay) els.loginOverlay.hidden = false;
+  if (els.authHint && message) els.authHint.textContent = message;
+}
+
+function hideAuthPrompt() {
+  if (els.loginOverlay) els.loginOverlay.hidden = true;
+  if (els.loginForm?.elements.password) els.loginForm.elements.password.value = "";
+  if (els.authHint) els.authHint.textContent = "登录后可写入数据库并同步操作审计。";
+}
+
+function renderSystemSettingsPanel() {
+  if (!els.systemHealthPanel || !els.systemBackupPanel || !els.systemLogPanel || !els.systemRestorePanel) return;
+  const checks = backendHealth?.checks || [];
+  const backups = backendBackups || [];
+  const versions = (state.uiPreferences?.systemVersions || []).slice(0, 6);
+  const logs = (state.uiPreferences?.systemLogs || []).slice(0, 8);
+  els.systemHealthPanel.innerHTML = `
+    <p>${backendHealth ? `数据库：${escapeHtml(backendHealth.database || "未知")}` : "数据库：读取中"}</p>
+    <p>${backendHealth ? `WAL：${escapeHtml(backendHealth.wal || "未知")}｜备份 ${backendHealth.backups || 0} 份` : "WAL：读取中"}</p>
+    <div class="health-grid">
+      ${checks.length ? checks.slice(0, 8).map((item) => `
+        <article class="${item.ok ? "ok" : "warn"}">
+          <strong>${escapeHtml(item.name)}</strong>
+          <small>${item.ok ? "正常" : escapeHtml(item.note || "异常")}</small>
+        </article>
+      `).join("") : `<article class="ok"><strong>等待刷新</strong><small>点击“刷新状态”后读取数据库健康信息。</small></article>`}
+    </div>
+  `;
+  els.systemBackupPanel.innerHTML = `
+    <p>${backups.length ? `已保留 ${backups.length} 份数据库备份。` : "暂无数据库备份。"}</p>
+    <div>
+      ${backups.slice(0, 6).map((backup) => `
+        <article>
+          <div>
+            <strong>${escapeHtml(backup.name)}</strong>
+            <small>${new Date(backup.createdAt).toLocaleString()}｜${Math.max(1, Math.round((backup.size || 0) / 1024))} KB</small>
+          </div>
+          <button type="button" data-system-restore-backup="${escapeAttr(backup.name)}">恢复</button>
+        </article>
+      `).join("") || `<article><div><strong>暂无备份</strong><small>可先执行一次数据库备份。</small></div></article>`}
+    </div>
+  `;
+  els.systemBackupPanel.querySelectorAll("[data-system-restore-backup]").forEach((button) => {
+    button.addEventListener("click", () => restoreBackendBackup(button.dataset.systemRestoreBackup));
+  });
+  els.systemRestorePanel.innerHTML = `
+    <p>最近状态版本 ${versions.length || 0} 条，可按时间线查看与恢复。</p>
+    <div>
+      ${versions.length ? versions.map((item) => `
+        <article>
+          <div>
+            <strong>版本 ${escapeHtml(String(item.version))}</strong>
+            <small>${new Date(item.created_at || item.createdAt || Date.now()).toLocaleString()}｜${escapeHtml(item.summary || "")}</small>
+          </div>
+        </article>
+      `).join("") : `<article><div><strong>暂无版本摘要</strong><small>点击“刷新状态”会读取最近的状态版本。</small></div></article>`}
+    </div>
+  `;
+  els.systemLogPanel.innerHTML = `
+    <div>
+      ${logs.length ? logs.map((line) => `<article><div><strong>${escapeHtml(String(line))}</strong></div></article>`).join("") : `<article><div><strong>暂无日志</strong><small>点击“刷新状态”或“执行维护”查看系统日志。</small></div></article>`}
+    </div>
+  `;
+}
+
+async function createBackendBackup() {
+  if (!canUseBackendState()) return showToast("后端服务未连接", "warn");
+  if (backendAuthState.enabled && !backendAuthState.authenticated) return showAuthPrompt("请先登录后再创建数据库备份。");
+  try {
+    const response = await fetch("./api/backups", { method: "POST" });
+    if (!response.ok) throw new Error("backup failed");
+    await fetchBackendBackups();
+    renderBackendBackupPanel();
+    showToast("数据库备份已创建");
+  } catch {
+    showToast("数据库备份失败", "warn");
+  }
+}
+
+async function runBackendMaintenance() {
+  if (!canUseBackendState()) return showToast("后端服务未连接", "warn");
+  if (backendAuthState.enabled && !backendAuthState.authenticated) return showAuthPrompt("请先登录后再执行系统维护。");
+  try {
+    const response = await fetch("./api/maintenance", { method: "POST" });
+    if (!response.ok) throw new Error("maintenance failed");
+    await refreshBackendHealth();
+    await fetchBackendBackups();
+    await fetchBackendVersions();
+    await fetchBackendLogs();
+    renderSystemSettingsPanel();
+    showToast("系统维护已执行");
+  } catch {
+    showToast("系统维护失败", "warn");
+  }
+}
+
+async function restoreBackendBackup(name) {
+  if (!ensureCanEdit("恢复数据库备份")) return;
+  if (!(await confirmAction(`确定恢复数据库备份“${name}”吗？当前数据库会先自动备份。`, { title: "恢复数据库备份", okText: "恢复" }))) return;
+  try {
+    const response = await fetch(`./api/backups/${encodeURIComponent(name)}/restore`, { method: "POST" });
+    if (!response.ok) throw new Error("restore failed");
+    const restored = await readStateFromBackend();
+    if (!restored?.state) throw new Error("restored state missing");
+    state = migrateState(cloneData(restored.state));
+    backendStateVersion = Number(restored.version || 0);
+    pendingLocalStateSnapshot = JSON.stringify(state);
+    flushLocalStateWrite();
+    mirrorStateToIndexedDB();
+    recordAudit("恢复数据库备份", name);
+    await fetchBackendBackups();
+    render();
+    showToast("数据库备份已恢复");
+  } catch {
+    showToast("数据库备份恢复失败", "warn");
+  }
+}
+
+async function importBackendJsonBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const payload = JSON.parse(await file.text());
+    const nextState = payload.state || payload;
+    const preview = backupPreviewText(nextState, payload, file.name);
+    if (!(await confirmAction(`${preview}\n\n导入会先自动备份当前数据库，然后替换数据库状态。确定继续吗？`, { title: "导入数据库 JSON", okText: "导入" }))) return;
+    const response = await fetch("./api/import/json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("import failed");
+    const restored = await readStateFromBackend();
+    state = migrateState(cloneData(restored.state));
+    backendStateVersion = Number(restored.version || 0);
+    pendingLocalStateSnapshot = JSON.stringify(state);
+    flushLocalStateWrite();
+    mirrorStateToIndexedDB();
+    render();
+    showToast("数据库 JSON 已导入");
+  } catch (error) {
+    showToast(`导入失败：${error.message || "请检查 JSON 文件"}`, "warn");
+  } finally {
+    event.target.value = "";
+  }
+}
+
+async function refreshSystemState() {
+  await Promise.all([
+    refreshAuthState(),
+    refreshBackendHealth(),
+    fetchBackendBackups(),
+    fetchBackendVersions(),
+    fetchBackendLogs()
+  ]);
+  renderSystemSettingsPanel();
+}
+
 function recordAudit(action, detail = "") {
-  state.auditLogs = state.auditLogs || [];
-  state.auditLogs.unshift({
+  const log = {
     id: createId(),
     projectId: state.selectedProjectId,
     role: currentRole(),
     action,
     detail,
     time: new Date().toISOString()
-  });
+  };
+  state.auditLogs = state.auditLogs || [];
+  state.auditLogs.unshift(log);
   state.auditLogs = state.auditLogs.slice(0, 80);
+  queueBackendAudit(log);
+}
+
+function queueBackendAudit(log) {
+  if (!canUseBackendState()) return;
+  pendingBackendAuditQueue = readPendingBackendAuditQueue();
+  pendingBackendAuditQueue.push(log);
+  pendingBackendAuditQueue = pendingBackendAuditQueue.slice(-200);
+  persistPendingBackendAuditQueue();
+  flushBackendAuditQueue();
+}
+
+async function flushBackendAuditQueue() {
+  if (!canUseBackendState()) return false;
+  pendingBackendAuditQueue = readPendingBackendAuditQueue();
+  if (!pendingBackendAuditQueue.length) return true;
+  const remaining = [];
+  for (const log of pendingBackendAuditQueue) {
+    try {
+      const response = await fetch("./api/audit", {
+        method: "POST",
+        headers: backendJsonHeaders(),
+        body: JSON.stringify(log),
+        keepalive: true
+      });
+      if (response.status === 404) {
+        markBackendApiUnavailable();
+        return false;
+      }
+      if (!response.ok) throw new Error("audit save failed");
+    } catch {
+      remaining.push(log);
+    }
+  }
+  pendingBackendAuditQueue = remaining.slice(-200);
+  persistPendingBackendAuditQueue();
+  return remaining.length === 0;
+}
+
+function readPendingBackendAuditQueue() {
+  try {
+    const items = JSON.parse(localStorage.getItem(BACKEND_PENDING_AUDIT_KEY) || "[]");
+    return Array.isArray(items) ? items : [];
+  } catch {
+    localStorage.removeItem(BACKEND_PENDING_AUDIT_KEY);
+    return [];
+  }
+}
+
+function persistPendingBackendAuditQueue() {
+  try {
+    localStorage.setItem(BACKEND_PENDING_AUDIT_KEY, JSON.stringify(pendingBackendAuditQueue));
+  } catch {
+    pendingBackendAuditQueue = pendingBackendAuditQueue.slice(-50);
+    try {
+      localStorage.setItem(BACKEND_PENDING_AUDIT_KEY, JSON.stringify(pendingBackendAuditQueue));
+    } catch {
+      pendingBackendAuditQueue = [];
+    }
+  }
 }
 
 function createRestorePoint(reason) {
@@ -441,5 +1036,31 @@ function renderRestorePointPanel() {
   `;
   els.restorePointPanel.querySelectorAll("[data-restore-point]").forEach((button) => {
     button.addEventListener("click", () => restoreFromPoint(button.dataset.restorePoint));
+  });
+}
+
+function renderBackendBackupPanel() {
+  if (!els.backendBackupPanel) return;
+  const backups = backendBackups || [];
+  els.backendBackupPanel.innerHTML = `
+    <strong>数据库备份</strong>
+    <p>${backups.length ? `已保留 ${backups.length} 份数据库备份` : "暂无数据库备份"}｜支持一键恢复，恢复前会自动备份当前库。</p>
+    <div>
+      ${backups.length ? backups.slice(0, 8).map((backup) => `
+        <article>
+          <div>
+            <strong>${escapeHtml(backup.name)}</strong>
+            <small>${new Date(backup.createdAt).toLocaleString()}｜${Math.max(1, Math.round((backup.size || 0) / 1024))} KB</small>
+          </div>
+          <button type="button" data-restore-db-backup="${escapeAttr(backup.name)}">恢复</button>
+        </article>
+      `).join("") : `<article><div><strong>暂无备份</strong><small>点击“数据库备份”后会生成一份 SQLite 备份。</small></div></article>`}
+    </div>
+  `;
+  els.backendBackupPanel.querySelectorAll("[data-restore-db-backup]").forEach((button) => {
+    button.addEventListener("click", () => restoreBackendBackup(button.dataset.restoreDbBackup));
+  });
+  fetchBackendBackups().then((items) => {
+    if (items.length !== backups.length) renderBackendBackupPanel();
   });
 }

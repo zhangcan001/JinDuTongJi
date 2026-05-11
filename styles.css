@@ -319,6 +319,56 @@ h2 {
   white-space: nowrap;
 }
 
+.save-status {
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid rgba(139, 235, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(7, 17, 28, 0.62);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.save-status span {
+  grid-row: 1 / 3;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #8aa0ad;
+  box-shadow: 0 0 10px rgba(138, 160, 173, 0.4);
+}
+
+.save-status strong {
+  color: #eefaff;
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+.save-status small {
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.save-status[data-tone="saving"] span {
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(68, 215, 255, 0.65);
+}
+
+.save-status[data-tone="saved"] span {
+  background: var(--green);
+  box-shadow: 0 0 12px rgba(125, 255, 203, 0.65);
+}
+
+.save-status[data-tone="error"] span {
+  background: var(--danger);
+  box-shadow: 0 0 12px rgba(255, 95, 122, 0.7);
+}
+
 select,
 input,
 textarea {
@@ -914,6 +964,7 @@ td input[type="checkbox"] {
 .restore-panel,
 .audit-panel,
 .data-health-panel,
+.backend-backup-panel,
 .import-preview-section {
   margin-top: 12px;
   padding: 12px;
@@ -925,6 +976,7 @@ td input[type="checkbox"] {
 .restore-panel > strong,
 .audit-panel > strong,
 .data-health-panel > strong,
+.backend-backup-panel > strong,
 .import-preview-section h3 {
   display: block;
   margin: 0 0 10px;
@@ -935,6 +987,7 @@ td input[type="checkbox"] {
 .restore-panel article,
 .audit-panel article,
 .data-health-panel article,
+.backend-backup-panel article,
 .import-preview-section article {
   display: flex;
   justify-content: space-between;
@@ -948,6 +1001,7 @@ td input[type="checkbox"] {
 }
 
 .restore-panel article div,
+.backend-backup-panel article div,
 .audit-panel article div,
 .data-health-panel article div,
 .import-preview-section article {
@@ -956,6 +1010,8 @@ td input[type="checkbox"] {
 
 .restore-panel article strong,
 .restore-panel article small,
+.backend-backup-panel article strong,
+.backend-backup-panel article small,
 .audit-panel article strong,
 .audit-panel article small,
 .data-health-panel article strong,
@@ -967,6 +1023,7 @@ td input[type="checkbox"] {
 }
 
 .restore-panel article small,
+.backend-backup-panel article small,
 .audit-panel article small,
 .data-health-panel article small,
 .import-preview-section article small,
@@ -980,7 +1037,8 @@ td input[type="checkbox"] {
   color: #ff9aa3;
 }
 
-.restore-panel button {
+.restore-panel button,
+.backend-backup-panel button {
   min-height: 32px;
   border: 1px solid rgba(125, 255, 203, 0.38);
   border-radius: 7px;
@@ -3120,6 +3178,95 @@ body.office-mode .today-item button {
 .detail-dialog-body {
   padding: 18px;
   overflow: auto;
+}
+
+.auth-dialog {
+  width: min(560px, 100%);
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth-form input {
+  width: 100%;
+}
+
+.auth-hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.auth-status {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  min-width: 120px;
+}
+
+.auth-status strong {
+  font-size: 13px;
+}
+
+.auth-status small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.system-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.system-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.system-card > strong {
+  font-size: 14px;
+}
+
+.system-card-body {
+  display: grid;
+  gap: 8px;
+  color: var(--text);
+}
+
+.system-card-body small,
+.system-card-body p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.log-panel {
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+@media (max-width: 1024px) {
+  .system-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .detail-gallery {

@@ -38,6 +38,7 @@ loadScripts(context, [
   "js/business-rules.js",
   "js/project-helpers.js",
   "js/data.js",
+  "js/validation-schema.js",
   "js/dashboard.js",
   "js/state-import.js",
   "js/records-chart.js"

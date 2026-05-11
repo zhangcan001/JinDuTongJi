@@ -1,4 +1,4 @@
-const CACHE_NAME = "jindu-local-v2";
+const CACHE_NAME = "jindu-local-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,11 +8,12 @@ const ASSETS = [
   "./js/business-rules.js",
   "./js/project-helpers.js",
   "./js/dom.js",
+  "./js/validation-schema.js",
+  "./js/error-reporting.js",
   "./js/ui-dialogs.js",
   "./js/storage-audit.js",
   "./js/state-import.js",
-  "./js/import-file-reader.js",
-  "./js/import-excel.js",
+  "./js/import-loader.js",
   "./js/import-worker.js",
   "./js/dashboard.js",
   "./js/scope-model.js",
@@ -20,6 +21,7 @@ const ASSETS = [
   "./js/progress-chart.js",
   "./js/records-chart.js",
   "./js/main.js",
+  "./assets/progress-template.xlsx",
   "./js/vendor/xlsx.full.min.js"
 ];
 
@@ -37,11 +39,35 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-      return response;
-    }).catch(() => caches.match("./index.html")))
-  );
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith("/api/")) return;
+
+  if (event.request.mode === "navigate" || url.pathname.endsWith(".html") || url.pathname === "/") {
+    event.respondWith(networkFirst(event.request, "./index.html"));
+    return;
+  }
+
+  event.respondWith(cacheFirst(event.request));
 });
+
+async function networkFirst(request, fallbackUrl) {
+  try {
+    const response = await fetch(request);
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, response.clone());
+    return response;
+  } catch {
+    return caches.match(request).then((cached) => cached || caches.match(fallbackUrl));
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response.ok) {
+    const cache = await caches.open(CACHE_NAME);
+    cache.put(request, response.clone());
+  }
+  return response;
+}

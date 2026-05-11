@@ -1,7 +1,8 @@
 {
   "scripts": {
+    "start": "node --experimental-sqlite server.js",
     "lint": "node tests/lint.test.js",
-    "test": "npm run lint && node tests/business-rules.test.js && node tests/core-flows.test.js && node tests/performance.test.js && npm run test:ui",
+    "test": "npm run lint && node tests/business-rules.test.js && node tests/core-flows.test.js && node tests/performance.test.js && node tests/service-worker.test.js && node tests/server-security.test.js && npm run test:ui",
     "test:ui": "node tests/ui-smoke.test.js"
   },
   "devDependencies": {

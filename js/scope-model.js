@@ -552,7 +552,7 @@ function renderModelFloorPanel(selected) {
 function selectAdjacentFloor(building, delta) {
   const labels = floorLabelsForBuilding(building);
   const currentIndex = labels.indexOf(selectedModelFloor);
-  const nextIndex = Math.max(0, Math.min(labels.length - 1, currentIndex + delta));
+  const nextIndex = Math.max(0, Math.min(labels.length - 1, currentIndex - delta));
   selectedModelFloor = labels[nextIndex] || selectedModelFloor;
   renderProjectScope();
 }

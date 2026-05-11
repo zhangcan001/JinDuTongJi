@@ -3,7 +3,8 @@
     dashboard: "总览",
     scope: "项目部位",
     schedule: "计划节点",
-    issues: "滞后与整改"
+    issues: "滞后与整改",
+    system: "系统设置"
   };
   document.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === view);
@@ -27,6 +28,10 @@
 
   if (view === "dashboard") {
     requestAnimationFrame(() => drawChart(currentProjectItems("tasks")));
+  }
+
+  if (view === "system") {
+    requestAnimationFrame(() => refreshSystemState());
   }
 }
 

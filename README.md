@@ -62,27 +62,49 @@
 
 ## 本地运行
 
-这是一个静态前端项目，页面本身可以直接打开 `index.html`。如果需要运行自动化检查，请先安装 Node 依赖：
+项目支持两种本地运行方式。轻量使用时可以直接打开 `index.html` 或用静态服务运行；需要 SQLite 持久化、备份、日志和后端审计时，使用内置 Node 服务。
+
+先安装 Node 依赖：
 
 ```powershell
 npm install
 ```
 
-本地静态服务运行：
+静态模式：
 
 ```powershell
 npx serve .
 ```
 
-如果当前端口是 `4173`，浏览器访问：
+SQLite 后端模式：
+
+```powershell
+npm start
+```
+
+默认浏览器访问：
 
 ```text
 http://127.0.0.1:4173/
 ```
 
+如需开启后端写入鉴权，可设置管理员密码后启动：
+
+```powershell
+$env:JINDU_PASSWORD="your-password"
+npm start
+```
+
+如需固定会话 token 或在 HTTPS 反向代理后启用 `Secure` Cookie，可设置：
+
+```powershell
+$env:JINDU_TOKEN="replace-with-a-long-random-token"
+$env:JINDU_SECURE_COOKIE="1"
+```
+
 ## 本地检查
 
-项目包含轻量 Node 测试和 UI 冒烟测试，用于覆盖进度状态、整改流转、延期原因分类、CSV 转义、导入校验、状态迁移、权限过滤、IndexedDB 镜像行为和页面基础渲染：
+项目包含轻量 Node 测试和 UI 冒烟测试，用于覆盖进度状态、整改流转、延期原因分类、CSV 转义、导入校验、状态迁移、权限过滤、IndexedDB 镜像行为、Service Worker 缓存策略、后端鉴权/路径防护和页面基础渲染：
 
 ```powershell
 npm test
@@ -129,8 +151,11 @@ https://zhangcan001.github.io/JinDuTongJi/
 - `js/business-rules.js`：进度状态、整改流转、延期原因分类、日期和 CSV 转义等可测试业务规则。
 - `js/project-helpers.js`：项目、楼栋、楼层、单位、节点去重键和导入范围补齐等共享辅助函数。
 - `js/dom.js`：页面元素引用和模型交互状态。
+- `js/validation-schema.js`：任务、整改和导入数据的前端结构校验。
+- `js/error-reporting.js`：前端异常捕获，并在后端模式下写入审计日志。
 - `js/ui-dialogs.js`：统一 Toast 提醒和确认弹窗。
 - `js/storage-audit.js`：本地存储、IndexedDB 镜像、审计记录、恢复点和完整备份恢复。
+- `js/import-loader.js`：按需加载 Excel/CSV 导入相关脚本，减少首屏脚本体积。
 - `js/state-import.js`：权限、项目状态迁移、计划基线、数据体检和 CSV/周报导出。
 - `js/import-excel.js`：Excel 导入校验、预览、确认导入、待复核导入、导入版本和模板下载。
 - `js/dashboard.js`：总览大屏、预警、偏差、单位排名、多维分析和监理周报生成。
@@ -142,9 +167,11 @@ https://zhangcan001.github.io/JinDuTongJi/
 ## 维护说明
 
 - 数据仍以浏览器 `localStorage` 为首屏启动来源，并会延迟镜像到 IndexedDB 的 `JinDuTongJiDB/snapshots/latest`。如果 `localStorage` 缺失，页面启动后会尝试从 IndexedDB 最新快照恢复。
+- `js/import-excel.js` 和 `js/import-file-reader.js` 由 `js/import-loader.js` 在导入、粘贴或下载模板时按需加载。
 - `js/vendor/xlsx.full.min.js` 是本地 Excel 解析依赖；升级时请替换该文件并完成 `npm test` 和一次浏览器导入预览验证。
 - Excel 导入单文件限制为 8MB，解析后最多 10000 行；超过限制建议按施工单位或楼栋拆分导入。
 - 大文件后续拆分方向：`import-excel.js` 可按解析、校验、预览、应用导入、模板导出拆分；`scope-model.js` 可按范围维护、楼栋模型、楼层详情拆分。
 - 渲染后续优化方向：将当前全量 `render()` 调用逐步收敛为任务、范围、导入、配置等局部刷新函数。
+- 后端会同步维护 `projects`、`tasks`、`issues` 等结构化索引表，并提供分页查询接口；完整 JSON 快照仍作为恢复和版本回滚来源。
 
 点击“恢复示例”可恢复演示数据。

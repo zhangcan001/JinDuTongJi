@@ -368,7 +368,7 @@ async function saveTaskFromForm(event) {
   if (!ensureCanEdit("保存进度节点")) return;
   const form = event.currentTarget;
   const data = Object.fromEntries(new FormData(form));
-  const validation = validateTaskPayload(data);
+  const validation = validateTaskAgainstScope(data);
   if (validation.length) {
     notifyUser(validation.join("\n"));
     return;
@@ -480,21 +480,6 @@ function applyRecentTaskDefaults() {
   Object.entries(defaults).forEach(([name, value]) => {
     if (els.taskForm.elements[name] && !els.taskForm.elements[name].value) els.taskForm.elements[name].value = value;
   });
-}
-
-function validateTaskPayload(data) {
-  const problems = [];
-  if (!String(data.name || "").trim()) problems.push("节点名称不能为空。");
-  if (!String(data.owner || "").trim()) problems.push("责任单位不能为空。");
-  if (!data.planned) problems.push("计划完成日期不能为空。");
-  const progress = Number(data.progress || 0);
-  if (Number.isNaN(progress) || progress < 0 || progress > 100) problems.push("完成率必须在 0 到 100 之间。");
-  if (progress >= 100 && !data.actual) problems.push("完成率为 100% 时建议填写实际完成日期。");
-  const duplicate = state.tasks.find((task) => task.projectId === state.selectedProjectId
-    && task.id !== data.id
-    && taskKey(task) === taskKey({ projectId: state.selectedProjectId, building: data.building, floor: data.floor, system: data.system, owner: data.owner, name: data.name }));
-  if (duplicate) problems.push("相同楼栋、楼层、施工内容和节点名称已存在。");
-  return problems;
 }
 
 function updateTaskFiltersFromControls() {
@@ -730,18 +715,8 @@ async function saveIssueFromForm(event) {
     `附件: ${payload.attachments.length}`
   ], existing ? "编辑整改项" : "新增整改项");
   resetIssueForm();
-  saveState();
-  render();
+  commitStateChange("issues");
   showToast(existing ? "整改项已保存" : "整改项已添加");
-}
-
-function validateIssuePayload(data) {
-  const problems = [];
-  if (!String(data.title || "").trim()) problems.push("问题标题不能为空。");
-  if (!String(data.owner || "").trim()) problems.push("责任单位不能为空。");
-  if (!data.deadline) problems.push("要求完成日期不能为空。");
-  if (!String(data.action || "").trim()) problems.push("监理要求不能为空。");
-  return problems;
 }
 
 function editIssue(issueId) {
@@ -799,6 +774,7 @@ function statusClassForIssue(status) {
 function setDefaultDates() {
   const defaultDate = localDateText(today);
   document.querySelectorAll('input[type="date"]').forEach((input) => {
+    if (["actual", "closedAt"].includes(input.name)) return;
     if (!input.value) input.value = defaultDate;
   });
 }

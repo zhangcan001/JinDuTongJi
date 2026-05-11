@@ -47,6 +47,35 @@ function bindEvents() {
     saveState();
     render();
   });
+  els.loginBtn?.addEventListener("click", () => showAuthPrompt());
+  els.logoutBtn?.addEventListener("click", async () => {
+    await logoutBackendSession();
+    showToast("已退出登录");
+  });
+  els.loginOverlayClose?.addEventListener("click", hideAuthPrompt);
+  els.loginOverlay?.addEventListener("click", (event) => {
+    if (event.target === els.loginOverlay) hideAuthPrompt();
+  });
+  els.logoutFromDialogBtn?.addEventListener("click", async () => {
+    await logoutBackendSession();
+    hideAuthPrompt();
+    showToast("已退出登录");
+  });
+  els.refreshSystemBtn?.addEventListener("click", refreshSystemState);
+  els.runMaintenanceBtn?.addEventListener("click", runBackendMaintenance);
+  els.loginForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const password = String(els.loginForm.elements.password?.value || "").trim();
+    if (!password) return showToast("请输入管理员密码", "warn");
+    try {
+      await loginWithPassword(password);
+      hideAuthPrompt();
+      showToast("登录成功");
+      render();
+    } catch (error) {
+      showToast(error.message || "登录失败", "warn");
+    }
+  });
   els.globalSearchInput?.addEventListener("input", (event) => {
     globalSearchQuery = event.target.value.trim();
     taskFilters.query = globalSearchQuery;
@@ -67,6 +96,10 @@ function bindEvents() {
   els.pasteImportBtn?.addEventListener("click", importPastedTable);
   els.downloadTemplateBtn.addEventListener("click", downloadExcelTemplate);
   els.saveBaselineBtn?.addEventListener("click", savePlanBaseline);
+  els.backendBackupBtn?.addEventListener("click", createBackendBackup);
+  els.backendExportJsonBtn?.addEventListener("click", () => { window.location.href = "./api/export/json"; });
+  els.backendExportSqliteBtn?.addEventListener("click", () => { window.location.href = "./api/export/sqlite"; });
+  els.backendImportJsonInput?.addEventListener("change", importBackendJsonBackup);
   els.exportDelayBtn?.addEventListener("click", () => exportProjectCsv("滞后清单", "csv", buildDelayExportRows()));
   els.exportTasksBtn?.addEventListener("click", () => exportProjectCsv("节点台账", "csv", buildTaskExportRows(currentProjectItems("tasks"))));
   els.exportIssuesBtn?.addEventListener("click", () => exportProjectCsv("整改台账", "csv", buildIssueExportRows()));
@@ -268,8 +301,10 @@ function render() {
   renderWeightPanel();
   renderImportVersionPanel();
   renderRestorePointPanel();
+  renderBackendBackupPanel();
   renderDataHealthPanel();
   renderAuditLogPanel();
+  renderSystemSettingsPanel();
 }
 
 function renderDataPanels(scope = "data") {
@@ -620,7 +655,20 @@ setDefaultDates();
 initializeLocalOnlyFeatures();
 render();
 if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
-hydrateStateFromIndexedDB().then((restored) => {
+refreshAuthState().then(() => {
+  updateAuthUi?.();
+  resumePendingBackendWork();
+});
+hydrateStateFromBackend().then((restoredFromBackend) => {
+  if (restoredFromBackend) {
+    restoreUiPreferences();
+    render();
+    if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
+    showToast("已从本地数据库恢复数据");
+    return true;
+  }
+  return hydrateStateFromIndexedDB();
+}).then((restored) => {
   if (!restored) return;
   restoreUiPreferences();
   render();
