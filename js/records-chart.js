@@ -493,6 +493,7 @@ function updateTaskFiltersFromControls() {
   taskFilters.status = els.taskStatusFilter?.value || "all";
   taskFilters.smart = els.taskSmartFilter?.value || "all";
   taskFilters.building = els.taskBuildingFilter?.value || "all";
+  taskFilters.floor = els.taskFloorFilter?.value || "all";
   taskFilters.owner = els.taskOwnerFilter?.value || "all";
   taskFilters.sort = els.taskSortSelect?.value || "plannedAsc";
   taskFilters.page = 1;
@@ -512,6 +513,11 @@ function syncTaskFilterControls(tasks) {
     taskFilters.building
   );
   syncFilterSelect(
+    els.taskFloorFilter,
+    [["all", "全部楼层"], ...uniqueSorted(tasks.map((task) => normalizedFloorKey(task.floor || "")).filter(Boolean)).map((item) => [item, item])],
+    taskFilters.floor
+  );
+  syncFilterSelect(
     els.taskOwnerFilter,
     [["all", "全部单位"], ...uniqueSorted(tasks.map((task) => task.owner || task.discipline || "未填单位")).map((item) => [item, item])],
     taskFilters.owner
@@ -529,6 +535,7 @@ function syncFilterSelect(select, options, selectedValue) {
   select.value = options.some(([value]) => value === selectedValue) ? selectedValue : "all";
   if (select.value !== selectedValue) {
     if (select === els.taskBuildingFilter) taskFilters.building = select.value;
+    if (select === els.taskFloorFilter) taskFilters.floor = select.value;
     if (select === els.taskOwnerFilter) taskFilters.owner = select.value;
   }
 }

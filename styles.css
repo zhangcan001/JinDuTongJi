@@ -235,7 +235,7 @@ button {
 .topbar {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(220px, auto) minmax(480px, 1fr);
+  grid-template-columns: minmax(220px, auto) minmax(320px, 1fr) auto;
   align-items: end;
   gap: 20px;
   margin-bottom: 24px;
@@ -289,9 +289,41 @@ h2 {
 
 .top-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 0.8fr);
   gap: 10px;
   align-items: end;
+}
+
+.top-more-actions {
+  position: relative;
+  z-index: 10;
+  justify-self: end;
+}
+
+.top-more-actions summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  border: 1px solid rgba(139, 235, 255, 0.2);
+  border-radius: 8px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.top-more-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  display: grid;
+  width: min(360px, calc(100vw - 28px));
+  gap: 10px;
+  border: 1px solid rgba(139, 235, 255, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
 }
 
 .top-field {
@@ -2082,6 +2114,379 @@ td input[type="checkbox"] {
   gap: 14px;
 }
 
+.progress-query-panel {
+  margin-bottom: 14px;
+}
+
+.dashboard-import-zone {
+  margin-bottom: 14px;
+}
+
+.dashboard-import-panel {
+  border-color: rgba(14, 165, 233, 0.22);
+}
+
+.dashboard-import-panel .panel-heading h2 {
+  font-size: 22px;
+}
+
+.dashboard-import-panel .import-grid {
+  grid-template-columns: minmax(320px, 1.35fr) repeat(3, minmax(180px, 0.75fr));
+  align-items: stretch;
+}
+
+.dashboard-import-panel .import-primary {
+  grid-column: auto;
+}
+
+.dashboard-import-panel .import-group {
+  min-height: 100%;
+}
+
+.dashboard-import-panel .import-group:not(.import-primary) {
+  background: rgba(3, 10, 18, 0.22);
+}
+
+.dashboard-import-panel #importResult {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.import-advanced-actions {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border: 1px solid rgba(139, 235, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(3, 10, 18, 0.2);
+}
+
+.import-advanced-actions summary {
+  min-height: 40px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.import-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.progress-query-bar {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.5fr) repeat(4, minmax(130px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.progress-query-bar label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progress-query-bar input,
+.progress-query-bar select,
+.progress-query-bar button {
+  min-height: 38px;
+}
+
+.progress-query-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.progress-query-stats article {
+  min-width: 0;
+  border: 1px solid rgba(139, 235, 255, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(3, 10, 18, 0.28);
+}
+
+.progress-query-stats span,
+.progress-query-stats strong {
+  display: block;
+}
+
+.progress-query-stats span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progress-query-stats strong {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 24px;
+}
+
+.progress-query-table table {
+  min-width: 900px;
+}
+
+.visual-dashboard-panel {
+  margin: 14px 0;
+}
+
+.dashboard-insight-panel {
+  margin-bottom: 14px;
+}
+
+.visual-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 14px;
+}
+
+.visual-block {
+  min-width: 0;
+  border: 1px solid rgba(139, 235, 255, 0.16);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(3, 10, 18, 0.26);
+}
+
+.visual-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.visual-block-head strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.visual-block-head small {
+  color: var(--muted);
+}
+
+.floor-heatmap {
+  display: grid;
+  gap: 12px;
+}
+
+.heatmap-building {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.heatmap-building-head,
+.heatmap-floor,
+.unit-progress-row-chart {
+  border: 1px solid rgba(139, 235, 255, 0.16);
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.heatmap-building-head {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.44);
+  text-align: left;
+}
+
+.heatmap-building-head span,
+.heatmap-floor span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.heatmap-building-head strong {
+  font-size: 22px;
+}
+
+.heatmap-floor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
+  gap: 8px;
+}
+
+.heatmap-floor {
+  display: grid;
+  align-content: center;
+  min-height: 58px;
+  padding: 8px;
+  background: rgba(100, 116, 139, 0.18);
+  text-align: left;
+}
+
+.heatmap-floor strong {
+  margin-top: 3px;
+  font-size: 15px;
+}
+
+.heatmap-floor.done {
+  border-color: rgba(5, 150, 105, 0.35);
+  background: rgba(5, 150, 105, 0.16);
+}
+
+.heatmap-floor.active {
+  border-color: rgba(14, 165, 233, 0.36);
+  background: rgba(14, 165, 233, 0.16);
+}
+
+.heatmap-floor.risk {
+  border-color: rgba(217, 119, 6, 0.42);
+  background: rgba(217, 119, 6, 0.18);
+}
+
+.heatmap-floor.delay {
+  border-color: rgba(220, 38, 38, 0.46);
+  background: rgba(220, 38, 38, 0.2);
+}
+
+.heatmap-floor.empty {
+  opacity: 0.58;
+}
+
+.heatmap-building-head:hover,
+.heatmap-floor:hover,
+.unit-progress-row-chart:hover {
+  border-color: rgba(14, 165, 233, 0.7);
+  transform: translateY(-1px);
+}
+
+.unit-progress-chart {
+  display: grid;
+  gap: 10px;
+}
+
+.unit-progress-row-chart {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.9fr) minmax(120px, 1.2fr) 54px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.36);
+  text-align: left;
+}
+
+.unit-progress-row-chart span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-progress-row-chart small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.unit-progress-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.unit-progress-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0ea5e9, #059669);
+}
+
+.unit-progress-row-chart.has-delay .unit-progress-track i {
+  background: linear-gradient(90deg, #dc2626, #d97706);
+}
+
+.dashboard-insight-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 12px;
+}
+
+.dashboard-health-card,
+.dashboard-history-card {
+  min-width: 0;
+  border: 1px solid rgba(139, 235, 255, 0.16);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(3, 10, 18, 0.24);
+}
+
+.dashboard-health-list,
+.dashboard-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboard-health-item,
+.dashboard-history-item {
+  min-width: 0;
+  border: 1px solid rgba(139, 235, 255, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.34);
+  color: var(--ink);
+  text-align: left;
+}
+
+.dashboard-health-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+}
+
+.dashboard-health-item small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+}
+
+.dashboard-health-item.warn strong {
+  color: #dc2626;
+}
+
+.dashboard-health-item.ok strong {
+  color: var(--green);
+}
+
+.dashboard-history-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.dashboard-history-item div {
+  min-width: 0;
+}
+
+.dashboard-history-item strong,
+.dashboard-history-item small {
+  display: block;
+}
+
+.dashboard-history-item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-history-item small,
+.dashboard-history-item span {
+  color: var(--muted);
+}
+
 .metric,
 .panel,
 .issue-card,
@@ -2526,7 +2931,7 @@ label {
 
 .task-filter-bar {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) repeat(4, minmax(130px, 1fr)) auto;
+  grid-template-columns: minmax(180px, 1.4fr) repeat(5, minmax(120px, 1fr)) auto;
   gap: 10px;
   align-items: end;
   margin-bottom: 14px;
@@ -2927,8 +3332,284 @@ body.office-mode .bulk-toolbar {
 }
 
 body.office-mode .command-screen {
+  display: none;
+}
+
+body.office-mode .dashboard-secondary {
+  display: none;
+}
+
+body.office-mode .dashboard-chart-grid {
+  grid-template-columns: 1fr;
+}
+
+body.office-mode .dashboard-chart-grid .panel:not(.wide) {
+  display: none;
+}
+
+body.office-mode .kpi-grid {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+body.office-mode .metric {
+  min-height: 96px;
+  padding: 14px;
+}
+
+body.office-mode .metric strong {
+  font-size: 30px;
+}
+
+body.office-mode .panel {
+  padding: 14px;
+}
+
+body.office-mode .panel-heading {
+  margin-bottom: 10px;
+}
+
+body.office-mode .panel-heading h2 {
+  font-size: 17px;
+}
+
+body.office-mode .panel-heading span {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+body.office-mode .sidebar {
+  gap: 18px;
+  padding: 18px 14px;
+  border-right-color: rgba(15, 23, 42, 0.08);
+  box-shadow: none;
+}
+
+body.office-mode .sidebar::before,
+body.office-mode .brand::after {
+  display: none;
+}
+
+body.office-mode .brand {
+  min-height: 48px;
+  padding: 4px 6px;
+}
+
+body.office-mode .brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  background: #0f172a;
+  box-shadow: none;
+}
+
+body.office-mode .nav-list {
+  gap: 6px;
+  padding: 0;
+}
+
+body.office-mode .nav-item {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: #475569;
+  padding-left: 34px;
+  box-shadow: none;
+}
+
+body.office-mode .nav-item::before {
+  width: 6px;
+  height: 6px;
+  background: #cbd5e1;
+}
+
+body.office-mode .nav-item:hover,
+body.office-mode .nav-item.active {
+  background: #eef6ff;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+body.office-mode .workspace {
+  padding: 22px;
+}
+
+body.office-mode .topbar {
+  grid-template-columns: minmax(180px, auto) minmax(360px, 1fr) auto;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-color: rgba(15, 23, 42, 0.08);
   background: #ffffff;
-  color: var(--ink);
+  box-shadow: none;
+}
+
+body.office-mode .topbar::before,
+body.office-mode .eyebrow {
+  display: none;
+}
+
+body.office-mode h1 {
+  color: #0f172a;
+  font-size: 24px;
+  text-shadow: none;
+}
+
+body.office-mode .top-actions {
+  grid-template-columns: minmax(180px, 1.4fr) minmax(150px, 0.8fr);
+  gap: 8px;
+}
+
+body.office-mode .top-more-actions summary {
+  min-height: 34px;
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #f8fafc;
+  color: #475569;
+}
+
+body.office-mode .top-more-panel {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: #ffffff;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
+}
+
+body.office-mode .top-field {
+  font-size: 10px;
+}
+
+body.office-mode .top-field select,
+body.office-mode .top-field input,
+body.office-mode #projectFilter {
+  min-height: 34px;
+}
+
+body.office-mode .save-status {
+  min-height: 34px;
+  border-color: rgba(15, 23, 42, 0.08);
+  background: #f8fafc;
+}
+
+body.office-mode .save-status strong {
+  color: #0f172a;
+}
+
+body.office-mode .dashboard-import-panel .import-group:not(.import-primary) {
+  background: #f8fafc;
+}
+
+body.office-mode .dashboard-import-zone,
+body.office-mode .progress-query-panel,
+body.office-mode .visual-dashboard-panel,
+body.office-mode .dashboard-insight-panel {
+  margin-bottom: 10px;
+}
+
+body.office-mode .dashboard-import-panel .import-grid {
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+body.office-mode .import-advanced-actions {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+body.office-mode .import-advanced-actions summary {
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+body.office-mode .import-group {
+  padding: 12px;
+}
+
+body.office-mode .import-group strong {
+  margin-bottom: 8px;
+}
+
+body.office-mode .progress-query-bar {
+  grid-template-columns: minmax(180px, 1.2fr) repeat(4, minmax(112px, 0.8fr)) auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+body.office-mode .progress-query-stats {
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+body.office-mode .progress-query-stats article {
+  padding: 10px;
+}
+
+body.office-mode .progress-query-stats strong {
+  font-size: 21px;
+}
+
+body.office-mode .visual-dashboard-grid {
+  gap: 10px;
+}
+
+body.office-mode .visual-block {
+  padding: 12px;
+}
+
+body.office-mode .floor-heatmap,
+body.office-mode .unit-progress-chart {
+  gap: 8px;
+}
+
+body.office-mode .heatmap-building {
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 8px;
+}
+
+body.office-mode .heatmap-building-head {
+  padding: 8px;
+}
+
+body.office-mode .heatmap-building-head strong {
+  font-size: 19px;
+}
+
+body.office-mode .heatmap-floor-grid {
+  gap: 6px;
+}
+
+body.office-mode .heatmap-floor {
+  min-height: 48px;
+  padding: 6px;
+}
+
+body.office-mode .unit-progress-row-chart {
+  padding: 8px;
+}
+
+body.office-mode .progress-query-stats article {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+body.office-mode .visual-block,
+body.office-mode .dashboard-health-card,
+body.office-mode .dashboard-history-card,
+body.office-mode .dashboard-health-item,
+body.office-mode .dashboard-history-item,
+body.office-mode .heatmap-building-head,
+body.office-mode .unit-progress-row-chart {
+  background: #f8fafc;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+body.office-mode th {
+  background: #f8fafc;
+  color: #475569;
+}
+
+body.office-mode td {
+  border-bottom-color: rgba(15, 23, 42, 0.08);
 }
 
 body.office-mode select,
@@ -2947,6 +3628,45 @@ body.office-mode .project-actions button,
 body.office-mode .today-item button {
   background: #f8fafc;
   color: #0f172a;
+}
+
+body.simple-mode .optional-feature,
+body.simple-mode .top-more-actions,
+body.simple-mode .dashboard-secondary,
+body.simple-mode .import-advanced-actions,
+body.simple-mode #downloadTemplateBtn,
+body.simple-mode #cancelImportParseBtn,
+body.simple-mode #pasteImportText,
+body.simple-mode #pasteImportBtn {
+  display: none !important;
+}
+
+body.simple-mode .app-shell {
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+body.simple-mode .topbar {
+  grid-template-columns: minmax(180px, auto) minmax(320px, 1fr);
+}
+
+body.simple-mode .top-actions {
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.6fr);
+}
+
+body.simple-mode .dashboard-import-panel .import-grid {
+  grid-template-columns: 1fr;
+}
+
+body.simple-mode .dashboard-import-panel #importResult {
+  color: var(--muted);
+}
+
+body.simple-mode .progress-query-table {
+  max-height: 360px;
+}
+
+body.simple-mode .task-filter-bar {
+  grid-template-columns: minmax(180px, 1.2fr) repeat(4, minmax(120px, 0.8fr)) auto;
 }
 
 .diary-scope-fields {
@@ -3045,6 +3765,9 @@ body.office-mode .today-item button {
 
   .topbar,
   .content-grid,
+  .visual-dashboard-grid,
+  .dashboard-insight-grid,
+  .dashboard-import-panel .import-grid,
   .split-panels,
   .model-grid,
   .model-toolbar,
@@ -3064,6 +3787,54 @@ body.office-mode .today-item button {
     grid-template-columns: repeat(2, minmax(180px, 1fr));
   }
 
+  body.office-mode .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  body.simple-mode .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  body.office-mode .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 10px 12px;
+  }
+
+  body.office-mode .brand,
+  body.office-mode .app-version {
+    display: none;
+  }
+
+  body.office-mode .nav-list {
+    display: flex;
+    overflow-x: auto;
+  }
+
+  body.office-mode .nav-item {
+    flex: 0 0 auto;
+  }
+
+  body.office-mode .topbar,
+  body.office-mode .top-actions,
+  body.office-mode .dashboard-insight-grid,
+  body.office-mode .dashboard-import-panel .import-grid,
+  body.office-mode .import-advanced-grid,
+  body.office-mode .progress-query-bar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body.simple-mode .topbar,
+  body.simple-mode .top-actions,
+  body.simple-mode .task-filter-bar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  body.office-mode .heatmap-building {
+    grid-template-columns: 1fr;
+  }
+
   .import-primary {
     grid-column: span 1;
   }
@@ -3078,6 +3849,7 @@ body.office-mode .today-item button {
   }
 
   .kpi-grid,
+  .progress-query-stats,
   .form-grid,
   .issue-board,
   .analytics-grid,
@@ -3088,6 +3860,14 @@ body.office-mode .today-item button {
 
   .building-grid {
     grid-template-columns: repeat(4, minmax(86px, 1fr));
+  }
+
+  .progress-query-bar {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .heatmap-building {
+    grid-template-columns: 1fr;
   }
 
   .floor-progress-row {
@@ -3116,6 +3896,11 @@ body.office-mode .today-item button {
   }
 
   .kpi-grid,
+  .progress-query-bar,
+  .progress-query-stats,
+  .visual-dashboard-grid,
+  .dashboard-insight-grid,
+  .dashboard-import-panel .import-grid,
   .form-grid,
   .issue-board,
   .analytics-grid,
@@ -3130,6 +3915,52 @@ body.office-mode .today-item button {
   }
 
   .top-actions {
+    grid-template-columns: 1fr;
+  }
+
+  body.office-mode .topbar,
+  body.office-mode .top-actions,
+  body.office-mode .top-more-panel,
+  body.office-mode .dashboard-import-panel .import-grid,
+  body.office-mode .import-advanced-grid,
+  body.office-mode .progress-query-bar,
+  body.office-mode .progress-query-stats {
+    grid-template-columns: 1fr;
+  }
+
+  body.simple-mode .topbar,
+  body.simple-mode .top-actions,
+  body.simple-mode .task-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  body.office-mode .workspace {
+    overflow-x: hidden;
+    padding: 10px;
+  }
+
+  body.office-mode .nav-list {
+    max-width: calc(100vw - 24px);
+  }
+
+  body.office-mode .panel,
+  body.office-mode .metric,
+  body.office-mode .visual-block,
+  body.office-mode .dashboard-health-card,
+  body.office-mode .dashboard-history-card,
+  body.office-mode .import-group,
+  body.office-mode .top-actions > *,
+  body.office-mode .progress-query-bar > *,
+  body.office-mode .dashboard-import-panel .import-grid > *,
+  body.office-mode .import-advanced-grid > * {
+    min-width: 0;
+  }
+
+  body.office-mode .heatmap-floor-grid {
+    grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  }
+
+  body.office-mode .unit-progress-row-chart {
     grid-template-columns: 1fr;
   }
 

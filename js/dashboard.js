@@ -1,8 +1,8 @@
 ﻿function switchView(view) {
   const titles = {
-    dashboard: "总览",
-    scope: "项目部位",
-    schedule: "计划节点",
+    dashboard: "数据分析",
+    scope: "3D模型",
+    schedule: "明细数据",
     issues: "滞后与整改",
     system: "系统设置"
   };
@@ -77,6 +77,9 @@ function renderDashboard() {
   els.dueSoonCount.textContent = dueSoon;
   els.openIssueCount.textContent = openIssues;
   renderCommandScreen(tasks, issues, { overall, delayed, dueSoon, openIssues });
+  renderProgressQuery(tasks);
+  renderVisualDashboard(tasks);
+  renderDashboardInsights(tasks);
   renderDashboardConfig();
   applyDashboardConfig();
   renderTodayTodo(tasks, issues);
@@ -114,6 +117,290 @@ function renderDashboard() {
   drawChart(tasks);
   renderOperationsDashboard(tasks);
   renderAnalyticsPanel(tasks, issues);
+}
+
+function renderProgressQuery(tasks = currentProjectItems("tasks")) {
+  if (!els.progressQueryTable) return;
+  syncProgressQueryControls(tasks);
+  const filters = progressQueryFilters();
+  const filtered = currentProjectFilteredTasks(tasks, filters);
+  const done = filtered.filter((task) => getTaskStatus(task).className === "done").length;
+  const delayed = filtered.filter((task) => getTaskStatus(task).className === "delay").length;
+  const dueSoon = filtered.filter((task) => getTaskStatus(task).className === "risk").length;
+  const active = filtered.filter((task) => {
+    const progress = Number(task.progress || 0);
+    return progress > 0 && progress < 100 && getTaskStatus(task).className !== "done";
+  }).length;
+  const progress = filtered.length ? averageProgress(filtered) : 0;
+  const scopeLabel = progressQueryScopeLabel(filters);
+
+  els.progressQuerySummary.textContent = `${scopeLabel}｜${filtered.length} / ${tasks.length} 个节点`;
+  els.progressQueryStats.innerHTML = [
+    ["综合完成率", `${progress}%`],
+    ["施工中", active],
+    ["已完成", done],
+    ["滞后", delayed],
+    ["临期", dueSoon]
+  ].map(([label, value]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+
+  const rows = filtered.slice(0, 80).map((task) => {
+    const status = getTaskStatus(task);
+    return `
+      <tr>
+        <td>
+          <button class="text-action" type="button" data-query-locate-task="${escapeAttr(task.id)}">${escapeHtml(resolveBuildingName(task.building || task.name) || "-")}</button>
+          <br><small>${escapeHtml(normalizedFloorKey(task.floor || "") || "未填楼层")}</small>
+        </td>
+        <td>${escapeHtml(task.owner || task.discipline || "未填单位")}</td>
+        <td><strong>${escapeHtml(task.system || task.name || "-")}</strong><br><small>${escapeHtml(task.name || "")}</small></td>
+        <td><strong>${Number(task.progress || 0)}%</strong></td>
+        <td><span class="status ${status.className}">${escapeHtml(status.label)}</span></td>
+        <td>${escapeHtml(task.planned || "-")}</td>
+        <td>${escapeHtml(task.note || "-")}</td>
+      </tr>
+    `;
+  }).join("");
+
+  els.progressQueryTable.innerHTML = rows || tableEmptyRowHtml(7, "当前筛选条件下暂无进度节点", "可以调整单位、楼栋或楼层后再查。");
+}
+
+function syncProgressQueryControls(tasks) {
+  syncFilterSelect(
+    els.progressQueryUnitFilter,
+    [["all", "全部单位"], ...uniqueSorted(tasks.map((task) => task.owner || task.discipline || "未填单位")).map((item) => [item, item])],
+    els.progressQueryUnitFilter?.value || "all"
+  );
+  syncFilterSelect(
+    els.progressQueryBuildingFilter,
+    [["all", "全部楼栋"], ...uniqueSorted(tasks.map((task) => resolveBuildingName(task.building || task.name)).filter(Boolean)).map((item) => [item, item])],
+    els.progressQueryBuildingFilter?.value || "all"
+  );
+  syncFilterSelect(
+    els.progressQueryFloorFilter,
+    [["all", "全部楼层"], ...uniqueSorted(tasks.map((task) => normalizedFloorKey(task.floor || "")).filter(Boolean)).map((item) => [item, item])],
+    els.progressQueryFloorFilter?.value || "all"
+  );
+}
+
+function progressQueryFilters() {
+  return {
+    query: els.progressQueryInput?.value.trim() || "",
+    status: els.progressQueryStatusFilter?.value || "all",
+    building: els.progressQueryBuildingFilter?.value || "all",
+    floor: els.progressQueryFloorFilter?.value || "all",
+    owner: els.progressQueryUnitFilter?.value || "all",
+    smart: "all",
+    sort: "plannedAsc"
+  };
+}
+
+function progressQueryScopeLabel(filters) {
+  const parts = [
+    filters.owner !== "all" ? filters.owner : "",
+    filters.building !== "all" ? filters.building : "",
+    filters.floor !== "all" ? filters.floor : "",
+    filters.status !== "all" ? statusLabel(filters.status) : "",
+    filters.query ? `关键词 ${filters.query}` : ""
+  ].filter(Boolean);
+  return parts.length ? parts.join(" / ") : "全部范围";
+}
+
+function updateProgressQuery() {
+  renderProgressQuery(currentProjectItems("tasks"));
+}
+
+function resetProgressQuery() {
+  if (els.progressQueryInput) els.progressQueryInput.value = "";
+  [
+    els.progressQueryUnitFilter,
+    els.progressQueryBuildingFilter,
+    els.progressQueryFloorFilter,
+    els.progressQueryStatusFilter
+  ].forEach((control) => {
+    if (control) control.value = "all";
+  });
+  renderProgressQuery(currentProjectItems("tasks"));
+}
+
+function handleProgressQueryTableClick(event) {
+  const locateButton = event.target.closest("[data-query-locate-task]");
+  if (!locateButton) return;
+  locateTaskInModel(locateButton.dataset.queryLocateTask);
+}
+
+function renderVisualDashboard(tasks = currentProjectItems("tasks")) {
+  renderFloorHeatmap(tasks);
+  renderUnitProgressChart(tasks);
+}
+
+function renderFloorHeatmap(tasks) {
+  if (!els.floorHeatmap) return;
+  const scope = currentProjectScope();
+  const stats = getBuildingStats(scope, tasks).filter((building) => building.related.length || !els.progressQueryInput?.value);
+  const floors = stats.flatMap((building) => building.floorDetails);
+  const delayed = floors.reduce((sum, floor) => sum + floor.delayCount, 0);
+  const active = floors.filter((floor) => floor.tasks.length).length;
+  if (els.visualDashboardSummary) {
+    els.visualDashboardSummary.textContent = `${stats.length} 个部位｜${active} 个有数据楼层｜${delayed} 个楼层含滞后`;
+  }
+  els.floorHeatmap.innerHTML = stats.length
+    ? stats.map((building) => `
+      <article class="heatmap-building">
+        <button class="heatmap-building-head" type="button" data-dashboard-building="${escapeAttr(building.name)}">
+          <span>${escapeHtml(building.name)}</span>
+          <strong>${building.progress}%</strong>
+        </button>
+        <div class="heatmap-floor-grid" style="--floor-count:${Math.max(1, building.floorDetails.length)}">
+          ${building.floorDetails.map((floor) => `
+            <button
+              class="heatmap-floor ${heatmapTone(floor)}"
+              type="button"
+              title="${escapeAttr(building.name)} ${floor.label} ${floor.progress}%"
+              data-dashboard-building="${escapeAttr(building.name)}"
+              data-dashboard-floor="${escapeAttr(floor.label)}"
+            >
+              <span>${escapeHtml(shortFloorLabel(floor.label))}</span>
+              <strong>${floor.progress}%</strong>
+            </button>
+          `).join("")}
+        </div>
+      </article>
+    `).join("")
+    : emptyStateHtml("暂无楼栋进度数据", "上传进度表格后会自动生成楼栋楼层热力图。");
+}
+
+function renderUnitProgressChart(tasks) {
+  if (!els.unitProgressChart) return;
+  const grouped = new Map();
+  tasks.forEach((task) => {
+    const unit = task.owner || task.discipline || "未填单位";
+    if (!grouped.has(unit)) grouped.set(unit, []);
+    grouped.get(unit).push(task);
+  });
+  const rows = Array.from(grouped.entries())
+    .map(([unit, unitTasks]) => ({
+      unit,
+      progress: averageProgress(unitTasks),
+      total: unitTasks.length,
+      delayed: unitTasks.filter((task) => getTaskStatus(task).className === "delay").length,
+      done: unitTasks.filter((task) => getTaskStatus(task).className === "done").length
+    }))
+    .sort((a, b) => a.progress - b.progress || b.delayed - a.delayed)
+    .slice(0, 10);
+  els.unitProgressChart.innerHTML = rows.length
+    ? rows.map((item) => `
+      <button class="unit-progress-row-chart ${item.delayed ? "has-delay" : ""}" type="button" data-dashboard-unit="${escapeAttr(item.unit)}">
+        <span>${escapeHtml(item.unit)}</span>
+        <div class="unit-progress-track"><i style="width:${item.progress}%"></i></div>
+        <strong>${item.progress}%</strong>
+        <small>${item.done}/${item.total} 完成｜滞后 ${item.delayed}</small>
+      </button>
+    `).join("")
+    : emptyStateHtml("暂无单位进度数据", "导入后会按责任单位自动统计完成率。");
+}
+
+function heatmapTone(floor) {
+  if (!floor.tasks.length) return "empty";
+  if (floor.delayCount > 0) return "delay";
+  if (floor.status === "risk") return "risk";
+  if (floor.progress >= 100) return "done";
+  if (floor.progress > 0) return "active";
+  return "normal";
+}
+
+function shortFloorLabel(label) {
+  return String(label || "").replace("地下室", "地下").replace("层", "F");
+}
+
+function openDashboardFloor(building, floor) {
+  Object.assign(taskFilters, {
+    query: "",
+    status: "all",
+    building: building || "all",
+    floor: floor || "all",
+    owner: "all",
+    smart: "all",
+    sort: "plannedAsc",
+    page: 1
+  });
+  persistUiPreferences();
+  switchView("schedule");
+}
+
+function openDashboardUnit(unit) {
+  Object.assign(taskFilters, {
+    query: "",
+    status: "all",
+    building: "all",
+    floor: "all",
+    owner: unit || "all",
+    smart: "all",
+    sort: "progressAsc",
+    page: 1
+  });
+  persistUiPreferences();
+  switchView("schedule");
+}
+
+function handleVisualDashboardClick(event) {
+  const floorButton = event.target.closest("[data-dashboard-floor]");
+  if (floorButton) return openDashboardFloor(floorButton.dataset.dashboardBuilding, floorButton.dataset.dashboardFloor);
+  const buildingButton = event.target.closest("[data-dashboard-building]");
+  if (buildingButton) return openDashboardFloor(buildingButton.dataset.dashboardBuilding, "all");
+  const unitButton = event.target.closest("[data-dashboard-unit]");
+  if (unitButton) return openDashboardUnit(unitButton.dataset.dashboardUnit);
+}
+
+function renderDashboardInsights(tasks = currentProjectItems("tasks")) {
+  renderDashboardHealth(tasks);
+  renderDashboardImportHistory();
+}
+
+function renderDashboardHealth(tasks) {
+  if (!els.dashboardHealthList) return;
+  const report = buildDataHealthReport();
+  const sections = report.sections
+    .filter((section) => section.items.length)
+    .sort((a, b) => b.items.length - a.items.length)
+    .slice(0, 5);
+  const issueCount = report.sections.reduce((sum, section) => sum + section.items.length, 0);
+  const pending = (state.pendingImports || []).filter((item) => item.projectId === state.selectedProjectId).length;
+  if (els.dashboardInsightSummary) {
+    els.dashboardInsightSummary.textContent = issueCount ? `${issueCount} 条数据风险｜待复核 ${pending} 条` : `${tasks.length} 个节点数据正常`;
+  }
+  els.dashboardHealthList.innerHTML = sections.length
+    ? sections.map((section) => `
+      <button class="dashboard-health-item warn" type="button" data-open-health="${escapeAttr(section.title)}">
+        <span>${escapeHtml(section.title)}</span>
+        <strong>${section.items.length}</strong>
+        <small>${escapeHtml(section.items[0] || "")}</small>
+      </button>
+    `).join("")
+    : `<article class="dashboard-health-item ok"><span>数据质量</span><strong>正常</strong><small>当前项目未发现明显异常。</small></article>`;
+}
+
+function renderDashboardImportHistory() {
+  if (!els.dashboardImportHistory) return;
+  const records = (state.importHistory || [])
+    .filter((item) => item.projectId === state.selectedProjectId)
+    .slice(0, 5);
+  els.dashboardImportHistory.innerHTML = records.length
+    ? records.map((item) => `
+      <article class="dashboard-history-item">
+        <div>
+          <strong>${escapeHtml(item.fileName || "未命名导入")}</strong>
+          <small>${new Date(item.time).toLocaleString()}｜新增 ${Number(item.created || 0)}｜更新 ${Number(item.updated || 0)}｜跳过 ${Number(item.skipped || 0)}</small>
+        </div>
+        <span>${Number(item.locations?.length || 0)} 个楼层</span>
+      </article>
+    `).join("")
+    : emptyStateHtml("暂无上传记录", "上传进度表格并确认同步后会显示在这里。");
+}
+
+function handleDashboardInsightClick(event) {
+  const healthButton = event.target.closest("[data-open-health]");
+  if (!healthButton) return;
+  switchView("system");
 }
 
 function renderDashboardConfig() {

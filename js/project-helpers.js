@@ -116,6 +116,7 @@ function deriveTaskFields(task) {
   task._statusClass = typeof getTaskStatus === "function" ? getTaskStatus(task).className : "";
   const buildingText = String(task.building || task.name || "");
   task._buildingKey = globalThis.state ? resolveBuildingName(buildingText) : buildingText.replace(/（.*?）|\(.*?\)/g, "");
+  task._floorKey = normalizedFloorKey(task.floor || "");
   task._ownerKey = task.owner || task.discipline || "未填单位";
   task._searchText = [
     task.name,
@@ -228,13 +229,32 @@ function findScopeUnitForImportedRow(scope, imported) {
   const owner = String(imported.owner || "").trim();
   return scope.units.find((unit) => {
     const unitName = String(unit.name || "").trim();
+    const unitKey = normalizedOwnerKey(unitName);
+    const ownerKey = normalizedOwnerKey(owner);
+    const disciplineKey = normalizedOwnerKey(discipline);
     if (!unitName) return false;
     if (owner && unitName === owner) return true;
     if (discipline && unitName === discipline) return true;
+    if (owner && unitKey === ownerKey) return true;
+    if (discipline && unitKey === disciplineKey) return true;
     if (discipline && unitName.includes(discipline)) return true;
     if (owner && unitName.includes(owner)) return true;
     return false;
   }) || null;
+}
+
+function scopeUnitHasSystem(scope, imported, relatedUnit = null) {
+  const system = String(imported?.system || "").trim();
+  if (!system) return true;
+  const ownerKey = normalizedOwnerKey(imported?.owner || imported?.discipline || inferDiscipline(imported?.owner, system));
+  const candidates = [
+    ...(relatedUnit ? [relatedUnit] : []),
+    ...((scope?.units || []).filter((unit) => normalizedOwnerKey(unit.name) === ownerKey)),
+    ...Object.values(demoState.projectScopes || {}).flatMap((projectScope) =>
+      (projectScope.units || []).filter((unit) => normalizedOwnerKey(unit.name) === ownerKey)
+    )
+  ];
+  return candidates.some((unit) => (unit.systems || []).includes(system));
 }
 
 function inferDiscipline(owner, system) {

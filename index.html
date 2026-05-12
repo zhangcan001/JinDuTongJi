@@ -8,23 +8,23 @@
     <meta name="theme-color" content="#0b1728" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="simple-mode">
     <div class="app-shell">
       <aside class="sidebar" aria-label="主导航">
         <div class="brand">
           <span class="brand-mark">监</span>
           <div>
-            <strong>进度管控台</strong>
-            <small>监理工程师专用</small>
+            <strong>进度分析</strong>
+            <small>上传表格生成图形化进度</small>
           </div>
         </div>
         <span class="app-version" id="appVersion">v</span>
         <nav class="nav-list">
-          <button class="nav-item active" data-view="dashboard">总览</button>
-          <button class="nav-item" data-view="scope">项目部位</button>
-          <button class="nav-item" data-view="schedule">计划节点</button>
-          <button class="nav-item" data-view="issues">滞后与整改</button>
-          <button class="nav-item" data-view="system">系统设置</button>
+          <button class="nav-item active" data-view="dashboard">数据分析</button>
+          <button class="nav-item" data-view="schedule">明细数据</button>
+          <button class="nav-item" data-view="scope">3D模型</button>
+          <button class="nav-item optional-feature" data-view="issues">滞后与整改</button>
+          <button class="nav-item optional-feature" data-view="system">系统设置</button>
         </nav>
       </aside>
 
@@ -32,43 +32,103 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">工程进度控制</p>
-            <h1 id="pageTitle">总览</h1>
+          <h1 id="pageTitle">数据分析</h1>
           </div>
+          <details class="top-more-actions">
+            <summary>更多</summary>
+            <div class="top-more-panel">
+              <label class="top-field">
+                角色
+                <select id="roleSelect" aria-label="选择当前角色">
+                  <option value="admin">管理员</option>
+                  <option value="pm">项目经理</option>
+                  <option value="contractor">施工单位</option>
+                  <option value="supervisor">监理</option>
+                  <option value="viewer">只读查看</option>
+                </select>
+              </label>
+              <label class="top-field">
+                单位
+                <select id="contractorUnitSelect" aria-label="选择单位权限"></select>
+              </label>
+              <div class="save-status" id="saveStatus" data-tone="idle" role="status" aria-live="polite">
+                <span></span>
+                <strong>本地数据库</strong>
+                <small>等待同步</small>
+              </div>
+              <button class="ghost-btn" id="officeModeBtn" type="button">办公模式</button>
+              <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
+            </div>
+          </details>
           <div class="top-actions">
-            <label class="top-field">
-              角色
-              <select id="roleSelect" aria-label="选择当前角色">
-                <option value="admin">管理员</option>
-                <option value="pm">项目经理</option>
-                <option value="contractor">施工单位</option>
-                <option value="supervisor">监理</option>
-                <option value="viewer">只读查看</option>
-              </select>
-            </label>
             <label class="top-field global-search-field">
               搜索
               <input id="globalSearchInput" placeholder="楼栋、节点、单位、问题" />
             </label>
             <label class="top-field">
-              单位
-              <select id="contractorUnitSelect" aria-label="选择单位权限"></select>
-            </label>
-            <label class="top-field">
               项目
               <select id="projectFilter" aria-label="选择项目"></select>
             </label>
-            <div class="save-status" id="saveStatus" data-tone="idle" role="status" aria-live="polite">
-              <span></span>
-              <strong>本地数据库</strong>
-              <small>等待同步</small>
-            </div>
-            <button class="ghost-btn" id="officeModeBtn" type="button">办公模式</button>
-            <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
           </div>
         </header>
 
         <section class="view active" id="dashboardView" aria-labelledby="pageTitle">
-          <section class="command-screen" aria-label="中控大屏">
+          <div class="dashboard-import-zone" id="dashboardImportMount"></div>
+
+          <section class="panel progress-query-panel" aria-label="进度筛选分析">
+            <div class="panel-heading">
+              <h2>筛选分析</h2>
+              <span id="progressQuerySummary">按单位、楼栋、楼层查看进度</span>
+            </div>
+            <div class="progress-query-bar">
+              <label>
+                关键词
+                <input id="progressQueryInput" placeholder="节点、施工内容、意见" />
+              </label>
+              <label>
+                单位
+                <select id="progressQueryUnitFilter"></select>
+              </label>
+              <label>
+                楼栋
+                <select id="progressQueryBuildingFilter"></select>
+              </label>
+              <label>
+                楼层
+                <select id="progressQueryFloorFilter"></select>
+              </label>
+              <label>
+                状态
+                <select id="progressQueryStatusFilter">
+                  <option value="all">全部状态</option>
+                  <option value="delay">已滞后</option>
+                  <option value="risk">临期</option>
+                  <option value="normal">正常</option>
+                  <option value="done">已完成</option>
+                </select>
+              </label>
+              <button class="ghost-btn" id="progressQueryResetBtn" type="button">清除筛选</button>
+            </div>
+            <div class="progress-query-stats" id="progressQueryStats"></div>
+            <div class="table-wrap progress-query-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>部位/楼层</th>
+                    <th>单位</th>
+                    <th>施工内容</th>
+                    <th>完成率</th>
+                    <th>状态</th>
+                    <th>计划</th>
+                    <th>监理意见</th>
+                  </tr>
+                </thead>
+                <tbody id="progressQueryTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="command-screen dashboard-secondary" aria-label="中控大屏">
             <div class="screen-header">
               <div>
                 <span class="screen-kicker">MISSION CONTROL DISPLAY</span>
@@ -134,15 +194,61 @@
             </article>
           </div>
 
-          <section class="panel dashboard-config-panel">
+          <section class="panel visual-dashboard-panel">
             <div class="panel-heading">
-              <h2>驾驶舱配置</h2>
+              <h2>图形化进度</h2>
+              <span id="visualDashboardSummary">上传表格后自动汇总</span>
+            </div>
+            <div class="visual-dashboard-grid">
+              <section class="visual-block floor-heatmap-block">
+                <div class="visual-block-head">
+                  <strong>楼栋楼层热力图</strong>
+                  <small>颜色越红，风险越高；点击楼层查看明细</small>
+                </div>
+                <div class="floor-heatmap" id="floorHeatmap"></div>
+              </section>
+              <section class="visual-block unit-progress-block">
+                <div class="visual-block-head">
+                  <strong>单位进度对比</strong>
+                  <small>按完成率和滞后项排序</small>
+                </div>
+                <div class="unit-progress-chart" id="unitProgressChart"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel dashboard-insight-panel">
+            <div class="panel-heading">
+              <h2>分析提示</h2>
+              <span id="dashboardInsightSummary">数据质量和上传记录</span>
+            </div>
+            <div class="dashboard-insight-grid">
+              <section class="dashboard-health-card">
+                <div class="visual-block-head">
+                  <strong>数据质量</strong>
+                  <small>优先修正影响统计的问题</small>
+                </div>
+                <div class="dashboard-health-list" id="dashboardHealthList"></div>
+              </section>
+              <section class="dashboard-history-card">
+                <div class="visual-block-head">
+                  <strong>最近上传</strong>
+                  <small>查看导入影响范围</small>
+                </div>
+                <div class="dashboard-history-list" id="dashboardImportHistory"></div>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel dashboard-config-panel dashboard-secondary optional-feature">
+            <div class="panel-heading">
+              <h2>看板模块</h2>
               <span>按角色保留常用模块</span>
             </div>
             <div class="dashboard-config" id="dashboardConfig"></div>
           </section>
 
-          <section class="panel today-panel">
+          <section class="panel today-panel dashboard-secondary optional-feature">
             <div class="panel-heading">
               <h2>今日待办</h2>
               <span id="todaySummary">按风险自动排序</span>
@@ -150,7 +256,7 @@
             <div class="today-list" id="todayTodoList"></div>
           </section>
 
-          <div class="ops-grid">
+          <div class="ops-grid dashboard-secondary optional-feature">
             <section class="panel ops-panel">
               <div class="panel-heading">
                 <h2>计划实际偏差</h2>
@@ -174,7 +280,7 @@
             </section>
           </div>
 
-          <section class="panel weekly-panel">
+          <section class="panel weekly-panel dashboard-secondary optional-feature">
             <div class="panel-heading">
               <h2>监理周报自动生成</h2>
               <span id="weeklySummary">按当前项目生成</span>
@@ -187,7 +293,7 @@
             <textarea id="weeklyReportOutput" rows="8" readonly></textarea>
           </section>
 
-          <div class="content-grid">
+          <div class="content-grid dashboard-chart-grid">
             <section class="panel wide">
               <div class="panel-heading">
                 <h2>进度曲线</h2>
@@ -204,7 +310,7 @@
             </section>
           </div>
 
-          <section class="panel analytics-panel">
+          <section class="panel analytics-panel dashboard-secondary optional-feature">
             <div class="panel-heading">
               <h2>多维统计分析</h2>
               <span id="analyticsSummary">按楼栋、单位、专业、月份统计</span>
@@ -214,7 +320,7 @@
         </section>
 
         <section class="view" id="scopeView">
-          <section class="panel project-admin-panel">
+          <section class="panel project-admin-panel optional-feature">
             <div class="panel-heading">
               <h2>项目管理</h2>
               <span id="projectAdminSummary">新增、复制、归档项目</span>
@@ -242,15 +348,15 @@
             <div class="project-admin-list" id="projectAdminList"></div>
           </section>
 
-          <section class="panel scope-command">
+          <section class="panel scope-command optional-feature">
             <div class="panel-heading">
-              <h2>项目部位与施工内容</h2>
+              <h2>楼栋楼层与施工内容</h2>
               <span id="scopeSummary">0 栋楼｜0 个单位</span>
             </div>
             <div class="building-grid" id="buildingGrid"></div>
           </section>
 
-          <section class="panel scope-maintenance">
+          <section class="panel scope-maintenance optional-feature">
             <div class="panel-heading">
               <h2>项目范围维护</h2>
               <span id="scopeManageSummary">楼栋、专业、施工内容</span>
@@ -309,8 +415,8 @@
 
           <section class="panel model-panel" aria-label="楼栋三维进度模型">
             <div class="panel-heading">
-              <h2>3D 楼栋完成模型</h2>
-              <span id="modelSummary">拖拽旋转｜点击楼栋查看明细</span>
+              <h2>3D 进度模型</h2>
+              <span id="modelSummary">按楼栋和楼层查看施工进度</span>
             </div>
             <div class="model-toolbar" aria-label="3D 模型筛选与视角控制">
               <label>
@@ -369,9 +475,9 @@
             </div>
           </section>
 
-          <section class="unit-grid" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
+          <section class="unit-grid optional-feature" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
 
-          <section class="panel dictionary-panel">
+          <section class="panel dictionary-panel optional-feature">
             <div class="panel-heading">
               <h2>数据字典</h2>
               <span id="dictionarySummary">楼栋、单位、施工内容</span>
@@ -379,7 +485,7 @@
             <div class="dictionary-grid" id="dictionaryGrid"></div>
           </section>
 
-          <section class="panel basement-section">
+          <section class="panel basement-section optional-feature">
             <div class="panel-heading">
               <h2>地下室剖面舱段</h2>
               <span id="basementSummary">地下系统进度</span>
@@ -391,8 +497,8 @@
         <section class="view" id="scheduleView">
           <div class="panel import-panel">
             <div class="panel-heading">
-              <h2>导入进度 Excel</h2>
-              <span>批量更新全局数据</span>
+              <h2>上传进度表格</h2>
+              <span>Excel / CSV 导入后自动生成图形化进度</span>
             </div>
             <div class="import-grid">
               <div class="import-group import-primary">
@@ -504,10 +610,10 @@
             <div class="audit-panel" id="auditLogPanel"></div>
           </div>
 
-          <div class="panel">
+          <div class="panel optional-feature">
             <div class="panel-heading">
-              <h2>新增计划节点</h2>
-              <span>计划、实际、责任单位</span>
+              <h2>手动维护进度节点</h2>
+              <span>适合少量补录或修正</span>
             </div>
             <form class="form-grid" id="taskForm">
               <input name="id" type="hidden" />
@@ -575,7 +681,7 @@
 
           <section class="panel">
             <div class="panel-heading">
-              <h2>节点台账</h2>
+              <h2>进度明细台账</h2>
               <span id="taskCount">0 项</span>
             </div>
             <div class="task-filter-bar">
@@ -608,6 +714,10 @@
                 <select id="taskBuildingFilter"></select>
               </label>
               <label>
+                楼层
+                <select id="taskFloorFilter"></select>
+              </label>
+              <label>
                 责任单位
                 <select id="taskOwnerFilter"></select>
               </label>
@@ -622,7 +732,7 @@
               </label>
               <button class="ghost-btn" id="taskFilterResetBtn" type="button">清除筛选</button>
             </div>
-            <div class="view-save-bar">
+            <div class="view-save-bar optional-feature">
               <label>
                 保存的视图
                 <select id="taskViewSelect"></select>
@@ -630,8 +740,8 @@
               <button class="ghost-btn" type="button" id="saveTaskViewBtn">保存当前筛选</button>
               <button class="ghost-btn" type="button" id="clearSavedViewsBtn">清理视图</button>
             </div>
-            <div class="column-toggle-bar" id="taskColumnToggles" aria-label="台账列显示"></div>
-            <div class="bulk-toolbar" id="bulkTaskToolbar">
+            <div class="column-toggle-bar optional-feature" id="taskColumnToggles" aria-label="台账列显示"></div>
+            <div class="bulk-toolbar optional-feature" id="bulkTaskToolbar">
               <label><input type="checkbox" id="selectAllTasks" /> 选择本页</label>
               <span id="bulkTaskSummary">已选 0 项</span>
               <button class="ghost-btn" type="button" data-bulk-progress="0">设为0%</button>

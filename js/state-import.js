@@ -126,6 +126,7 @@ function currentProjectFilteredTasks(tasks, filters = taskFilters) {
     filters.query || "",
     filters.status || "all",
     filters.building || "all",
+    filters.floor || "all",
     filters.owner || "all",
     filters.smart || "all",
     filters.sort || "plannedAsc"
@@ -141,6 +142,7 @@ function currentProjectFilteredTasks(tasks, filters = taskFilters) {
         if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
         if (filters.status !== "all" && status !== filters.status) return false;
         if (filters.building !== "all" && building !== filters.building) return false;
+        if ((filters.floor || "all") !== "all" && task._floorKey !== filters.floor) return false;
         if (filters.owner !== "all" && task._ownerKey !== filters.owner) return false;
         if (!taskMatchesSmartFilter(task, filters.smart || "all")) return false;
         return true;
@@ -188,12 +190,12 @@ function migrateState(nextState) {
   nextState.entityHistory = nextState.entityHistory || [];
   nextState.uiPreferences = {
     activeView: "dashboard",
-    officeMode: false,
+    officeMode: true,
     taskFilters: {},
     modelFilters: {},
     savedTaskViews: [],
     lastBackupAt: "",
-    dashboardCards: ["today", "ops", "weekly", "chart", "analytics"],
+    dashboardCards: ["today", "chart", "analytics"],
     ...(nextState.uiPreferences || {})
   };
   if ((nextState.uiPreferences.dashboardCards || []).some((item) => ["deviation", "dependency", "ranking"].includes(item))) {

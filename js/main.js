@@ -35,6 +35,7 @@ async function copyWeeklyReport() {
 }
 
 function bindEvents() {
+  reorganizeLayout();
   bindNavigationEvents();
   bindImportEvents();
   bindDataManagementEvents();
@@ -43,6 +44,25 @@ function bindEvents() {
   bindDashboardEvents();
   bindGlobalKeyboardEvents();
   bindProjectEvents();
+}
+
+function reorganizeLayout() {
+  const importPanel = document.querySelector(".import-panel");
+  if (els.dashboardImportMount && importPanel && importPanel.parentElement !== els.dashboardImportMount) {
+    els.dashboardImportMount.appendChild(importPanel);
+    importPanel.classList.add("dashboard-import-panel");
+  }
+  const importGrid = importPanel?.querySelector(".import-grid");
+  if (!importGrid || importGrid.querySelector(".import-advanced-actions")) return;
+  const secondaryGroups = [...importGrid.querySelectorAll(".import-group:not(.import-primary)")];
+  if (!secondaryGroups.length) return;
+  const advanced = document.createElement("details");
+  advanced.className = "import-advanced-actions";
+  advanced.innerHTML = `<summary>导出、备份和维护</summary><div class="import-advanced-grid"></div>`;
+  const advancedGrid = advanced.querySelector(".import-advanced-grid");
+  secondaryGroups.forEach((group) => advancedGrid.appendChild(group));
+  const result = importGrid.querySelector("#importResult");
+  importGrid.insertBefore(advanced, result || null);
 }
 
 function bindNavigationEvents() {
@@ -140,6 +160,7 @@ function bindTaskEvents() {
     els.taskStatusFilter,
     els.taskSmartFilter,
     els.taskBuildingFilter,
+    els.taskFloorFilter,
     els.taskOwnerFilter,
     els.taskSortSelect
   ].forEach((control) => {
@@ -148,7 +169,7 @@ function bindTaskEvents() {
   });
 
   els.taskFilterResetBtn?.addEventListener("click", () => {
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", floor: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     renderTasks();
     persistUiPreferences();
   });
@@ -220,6 +241,21 @@ function bindModelEvents() {
 }
 
 function bindDashboardEvents() {
+  [
+    els.progressQueryInput,
+    els.progressQueryUnitFilter,
+    els.progressQueryBuildingFilter,
+    els.progressQueryFloorFilter,
+    els.progressQueryStatusFilter
+  ].forEach((control) => {
+    control?.addEventListener("input", updateProgressQuery);
+    control?.addEventListener("change", updateProgressQuery);
+  });
+  els.progressQueryResetBtn?.addEventListener("click", resetProgressQuery);
+  els.progressQueryTable?.addEventListener("click", handleProgressQueryTableClick);
+  els.floorHeatmap?.addEventListener("click", handleVisualDashboardClick);
+  els.unitProgressChart?.addEventListener("click", handleVisualDashboardClick);
+  els.dashboardHealthList?.addEventListener("click", handleDashboardInsightClick);
   els.generateWeeklyBtn?.addEventListener("click", () => {
     els.weeklyReportOutput.value = generateWeeklyReport();
   });
@@ -278,7 +314,7 @@ function bindProjectEvents() {
     selectedModelFloor = "";
     lastImportFocus = null;
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", floor: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     commitStateChange("data");
     renderImportPreview(null);
     showToast("已切换项目");
@@ -292,7 +328,7 @@ function bindProjectEvents() {
     state.restorePoints = keepRestorePoints;
     recordAudit("恢复示例数据", "重置为内置示例");
     pendingImport = null;
-    Object.assign(taskFilters, { query: "", status: "all", building: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
+    Object.assign(taskFilters, { query: "", status: "all", building: "all", floor: "all", owner: "all", smart: "all", sort: "plannedAsc", page: 1 });
     saveState();
     render();
     renderImportPreview(null);
@@ -470,6 +506,7 @@ function taskViewSignature(filters) {
     query: String(filters?.query || ""),
     status: String(filters?.status || "all"),
     building: String(filters?.building || "all"),
+    floor: String(filters?.floor || "all"),
     owner: String(filters?.owner || "all"),
     smart: String(filters?.smart || "all"),
     sort: String(filters?.sort || "plannedAsc"),
@@ -501,6 +538,7 @@ function saveCurrentTaskView() {
       query: taskFilters.query,
       status: taskFilters.status,
       building: taskFilters.building,
+      floor: taskFilters.floor,
       owner: taskFilters.owner,
       smart: taskFilters.smart,
       sort: taskFilters.sort,
@@ -525,6 +563,7 @@ function applySavedTaskView(event) {
     query: view.filters?.query || "",
     status: view.filters?.status || "all",
     building: view.filters?.building || "all",
+    floor: view.filters?.floor || "all",
     owner: view.filters?.owner || "all",
     smart: view.filters?.smart || "all",
     sort: view.filters?.sort || "plannedAsc",

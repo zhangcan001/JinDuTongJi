@@ -40,9 +40,10 @@
     }
     if (normalized.building && !buildingMatched) warnings.push(`${rowLabel}：楼栋未在对应项目范围内，已自动补充或待复核`);
     const relatedUnit = findScopeUnitForImportedRow(scope, normalized);
-    if (normalized.system && relatedUnit && !relatedUnit.systems.includes(normalized.system)) {
+    const knownForUnit = scopeUnitHasSystem(scope, normalized, relatedUnit);
+    if (normalized.system && relatedUnit && !knownForUnit) {
       warnings.push(`${rowLabel}：${relatedUnit.name} 的施工内容“${normalized.system}”不在既有清单中`);
-    } else if (normalized.system && knownSystems.length && !knownSystems.includes(`${relatedUnit?.name || normalized.owner || normalized.discipline || "未命名单位"}｜${normalized.system}`)) {
+    } else if (normalized.system && knownSystems.length && !knownForUnit && !knownSystems.includes(`${relatedUnit?.name || normalized.owner || normalized.discipline || "未命名单位"}｜${normalized.system}`)) {
       warnings.push(`${rowLabel}：${normalized.system} 需按对应单位单独维护`);
     }
 
