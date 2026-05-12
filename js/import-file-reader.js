@@ -82,8 +82,57 @@ function readWorkbookRows(workbook) {
     .filter((sheetName) => !/说明|填报说明|readme/i.test(sheetName))
     .flatMap((sheetName) => {
       const sheet = workbook.Sheets[sheetName];
-      return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false })
-        .filter((row) => Object.values(row).some((value) => String(value || "").trim()))
-        .map((row) => ({ ...row, 来源工作表: sheetName }));
+      return readSheetRows(sheet, sheetName);
     });
+}
+
+function readSheetRows(sheet, sheetName) {
+  const cells = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false, blankrows: false });
+  if (!cells.length) return [];
+  const headerRowIndex = detectImportHeaderRow(cells);
+  const headers = normalizeImportHeaders(cells[headerRowIndex] || []);
+  return cells
+    .slice(headerRowIndex + 1)
+    .map((values, offset) => rowFromImportCells(headers, values, sheetName, headerRowIndex + offset + 2))
+    .filter((row) => Object.entries(row).some(([key, value]) => !key.startsWith("__") && key !== "来源工作表" && String(value || "").trim()));
+}
+
+function detectImportHeaderRow(cells) {
+  const maxRows = Math.min(cells.length, 20);
+  let best = { index: 0, score: -1 };
+  for (let index = 0; index < maxRows; index += 1) {
+    const row = cells[index] || [];
+    const score = importHeaderRowScore(row);
+    if (score > best.score) best = { index, score };
+  }
+  return best.index;
+}
+
+function importHeaderRowScore(row) {
+  const values = row.map((cell) => String(cell || "").trim()).filter(Boolean);
+  if (!values.length) return 0;
+  const matchedFields = new Set();
+  values.forEach((value) => {
+    const field = inferImportFieldForHeader(value);
+    if (field) matchedFields.add(field);
+  });
+  return matchedFields.size * 10 + Math.min(values.length, 12) - (values.length === 1 ? 8 : 0);
+}
+
+function normalizeImportHeaders(headerCells) {
+  const used = new Map();
+  return headerCells.map((cell, index) => {
+    const base = String(cell || "").trim() || `未命名列${index + 1}`;
+    const count = used.get(base) || 0;
+    used.set(base, count + 1);
+    return count ? `${base}_${count}` : base;
+  });
+}
+
+function rowFromImportCells(headers, values, sheetName, rowNumber) {
+  const row = { 来源工作表: sheetName, __importRowNumber: rowNumber };
+  headers.forEach((header, index) => {
+    row[header] = values[index] ?? "";
+  });
+  return row;
 }

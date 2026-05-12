@@ -39,10 +39,19 @@ async function importProgressExcel(event) {
 }
 
 function buildPendingImport(fileName, sourceRows) {
-  const rows = sourceRows.map((row, index) => ({ ...row, __importRowId: row.__importRowId || `row-${Date.now()}-${index}` }));
+  const headerLookup = buildImportHeaderLookup(sourceRows);
+  const rows = sourceRows.map((row, index) => ({
+    ...row,
+    __importRowId: row.__importRowId || `row-${Date.now()}-${index}`,
+    __importHeaderLookup: headerLookup
+  }));
   const mapping = inferImportFieldMap(rows);
   state.uiPreferences = state.uiPreferences || {};
   state.uiPreferences.importFieldMap = { ...(state.uiPreferences.importFieldMap || {}), ...mapping };
+  const headerMap = buildImportHeaderMap(rows);
+  rows.forEach((row) => {
+    row.__importHeaderMap = headerMap;
+  });
   const validation = validateImportRows(rows);
   updateImportProgress("正在生成导入预览");
   const preview = previewImportedRows(validation.validRows);
@@ -52,6 +61,8 @@ function buildPendingImport(fileName, sourceRows) {
     validation,
     preview,
     mapping: { ...state.uiPreferences.importFieldMap },
+    headerLookup,
+    headerMap,
     options: importOptions(),
     excludedRowIds: new Set(),
     approvedScopeKeys: new Set(preview.scopeSuggestions.map((item) => item.key)),

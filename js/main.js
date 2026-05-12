@@ -36,7 +36,6 @@ async function copyWeeklyReport() {
 
 function bindEvents() {
   bindNavigationEvents();
-  bindAuthEvents();
   bindImportEvents();
   bindDataManagementEvents();
   bindTaskEvents();
@@ -66,36 +65,6 @@ function bindNavigationEvents() {
   els.officeModeBtn?.addEventListener("click", toggleOfficeMode);
 }
 
-function bindAuthEvents() {
-  els.loginBtn?.addEventListener("click", () => showAuthPrompt());
-  els.logoutBtn?.addEventListener("click", async () => {
-    await logoutBackendSession();
-    showToast("已退出登录");
-  });
-  els.loginOverlayClose?.addEventListener("click", hideAuthPrompt);
-  els.loginOverlay?.addEventListener("click", (event) => {
-    if (event.target === els.loginOverlay) hideAuthPrompt();
-  });
-  els.logoutFromDialogBtn?.addEventListener("click", async () => {
-    await logoutBackendSession();
-    hideAuthPrompt();
-    showToast("已退出登录");
-  });
-  els.loginForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const password = String(els.loginForm.elements.password?.value || "").trim();
-    if (!password) return showToast("请输入管理员密码", "warn");
-    try {
-      await loginWithPassword(password);
-      hideAuthPrompt();
-      showToast("登录成功");
-      render();
-    } catch (error) {
-      showToast(error.message || "登录失败", "warn");
-    }
-  });
-}
-
 function bindImportEvents() {
   els.excelInput.addEventListener("change", importProgressExcel);
   document.querySelector("#cancelImportParseBtn")?.addEventListener("click", cancelImportParse);
@@ -108,6 +77,7 @@ function bindImportEvents() {
 
 function bindDataManagementEvents() {
   els.refreshSystemBtn?.addEventListener("click", refreshSystemState);
+  els.resolveBackendConflictBtn?.addEventListener("click", resolveBackendStateConflict);
   els.runMaintenanceBtn?.addEventListener("click", runBackendMaintenance);
   els.globalSearchInput?.addEventListener("input", (event) => {
     globalSearchQuery = event.target.value.trim();
@@ -433,7 +403,7 @@ function renderSystemDataPanelsIfVisible() {
 
 function commitStateChange(refresh = "all") {
   const startedAt = performance.now();
-  saveState({ immediate: refresh !== "prefs" });
+  saveState({ immediate: refresh !== "prefs", scope: refresh });
   if (refresh === "data") {
     renderDataPanels("data");
     return;
@@ -742,10 +712,7 @@ setDefaultDates();
 initializeLocalOnlyFeatures();
 render();
 if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
-refreshAuthState().then(() => {
-  updateAuthUi?.();
-  resumePendingBackendWork();
-});
+resumePendingBackendWork();
 hydrateStateFromBackend().then((restoredFromBackend) => {
   if (restoredFromBackend) {
     restoreUiPreferences();

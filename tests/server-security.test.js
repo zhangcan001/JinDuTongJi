@@ -69,7 +69,7 @@ async function waitForServer(port) {
   const started = Date.now();
   while (Date.now() - started < 10000) {
     try {
-      const response = await request(port, "GET", "/api/auth/status");
+      const response = await request(port, "GET", "/api/health");
       if (response.status === 200) return;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -83,9 +83,7 @@ async function waitForServer(port) {
     cwd: root,
     env: {
       ...process.env,
-      PORT: String(port),
-      JINDU_PASSWORD: "test-password",
-      JINDU_TOKEN: "test-token"
+      PORT: String(port)
     },
     stdio: "ignore"
   });
@@ -93,32 +91,13 @@ async function waitForServer(port) {
   try {
     await waitForServer(port);
 
-    const status = await request(port, "GET", "/api/auth/status");
-    assert.equal(status.status, 200);
-    assert.deepEqual(status.json, { enabled: true, authenticated: false });
-
     const anonymousState = await request(port, "GET", "/api/state");
-    assert.equal(anonymousState.status, 401);
+    assert.equal(anonymousState.status, 200);
 
     const health = await request(port, "GET", "/api/health");
     assert.equal(health.status, 200);
-    assert.equal(health.json.authEnabled, true);
-
-    const badJson = await requestRaw(port, "POST", "/api/auth/login", "{bad", { "Content-Type": "application/json" });
-    assert.equal(badJson.status, 400);
-    assert.ok(badJson.body.includes("请求 JSON 格式不正确"));
-
-    const login = await request(port, "POST", "/api/auth/login", { password: "test-password" });
-    assert.equal(login.status, 200);
-    const cookie = login.headers["set-cookie"]?.[0] || "";
-    assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Lax/);
-
-    const authenticatedState = await request(port, "GET", "/api/state", undefined, { Cookie: cookie });
-    assert.equal(authenticatedState.status, 200);
 
     const viewerWrite = await request(port, "PUT", "/api/state", { state: { projects: [], tasks: [], issues: [] }, baseVersion: 0 }, {
-      Cookie: cookie,
       "X-Jindu-Actor": "viewer"
     });
     assert.equal(viewerWrite.status, 403);
@@ -130,19 +109,19 @@ async function waitForServer(port) {
         issues: []
       },
       force: true
-    }, { Cookie: cookie, "X-Jindu-Actor": "admin" });
+    }, { "X-Jindu-Actor": "admin" });
     assert.equal(invalidTaskState.status, 400);
 
-    const projects = await request(port, "GET", "/api/projects", undefined, { Cookie: cookie });
+    const projects = await request(port, "GET", "/api/projects");
     assert.equal(projects.status, 200);
     assert.ok(Array.isArray(projects.json.projects));
 
-    const tasks = await request(port, "GET", "/api/tasks?limit=5&offset=0", undefined, { Cookie: cookie });
+    const tasks = await request(port, "GET", "/api/tasks?limit=5&offset=0");
     assert.equal(tasks.status, 200);
     assert.equal(tasks.json.limit, 5);
     assert.ok(Number.isFinite(tasks.json.total));
 
-    const missingBackup = await request(port, "POST", "/api/backups/missing.sqlite/restore", undefined, { Cookie: cookie, "X-Jindu-Actor": "admin" });
+    const missingBackup = await request(port, "POST", "/api/backups/missing.sqlite/restore", undefined, { "X-Jindu-Actor": "admin" });
     assert.equal(missingBackup.status, 404);
 
     const traversal = await requestRaw(port, "GET", "/..%2fpackage.json");

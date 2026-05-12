@@ -169,7 +169,6 @@ function disciplineColor(discipline) {
   if (text.includes("机电")) return "#44d7ff";
   if (text.includes("消防")) return "#ff5c6c";
   if (text.includes("智能")) return "#a78bfa";
-  if (text.includes("电梯")) return "#ffb84a";
   if (text.includes("土建")) return "#7dffcb";
   return "#8ff5ff";
 }

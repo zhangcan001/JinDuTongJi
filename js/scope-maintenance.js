@@ -8,7 +8,6 @@ function renderProjectScope() {
   if (cachedScope?.scope === scope && cachedScope?.tasks === tasks) {
     renderScopeMaintenance(scope);
     renderBuildingModel(scope, tasks);
-    renderElevatorDashboard(tasks);
     renderDictionaryPanel(scope);
     renderBasementCutaway(scope, tasks);
     return;
@@ -70,83 +69,9 @@ function renderProjectScope() {
 
   renderScopeMaintenance(scope);
   renderBuildingModel(scope, tasks);
-  renderElevatorDashboard(tasks);
   renderDictionaryPanel(scope);
   renderBasementCutaway(scope, tasks);
   stateCache.projectItems.set(scopeCacheKey, { scope, tasks });
-}
-
-function renderElevatorDashboard(tasks) {
-  if (!els.elevatorGrid) return;
-  const cacheKey = `elevator:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}:${tasks.length}:${tasks.map((task) => `${task.id}:${task.building}:${task.floor}:${task.progress}:${task.actual}`).join("|")}`;
-  const cached = stateCache.projectItems.get(cacheKey);
-  if (cached) {
-    if (els.elevatorSummary) els.elevatorSummary.textContent = cached.summary;
-    els.elevatorGrid.innerHTML = cached.html;
-    return;
-  }
-  const elevatorTasks = tasks.filter((task) => {
-    if (!`${task.owner || ""}${task.discipline || ""}${task.system || ""}`.includes("电梯")) return false;
-    if (isBasementElevatorTask(task)) return false;
-    return true;
-  });
-  const grouped = new Map();
-  elevatorTasks.forEach((task) => {
-    const building = resolveBuildingName(task.building || task.name) || "未填楼栋";
-    if (!grouped.has(building)) grouped.set(building, []);
-    grouped.get(building).push(task);
-  });
-  const rows = Array.from(grouped.entries()).map(([building, items]) => {
-    const floors = uniqueSorted(items.map((task) => normalizedFloorKey(task.floor || "")).filter(Boolean));
-    const floorRows = floors.map((floor) => {
-      const floorTasks = items.filter((task) => normalizedFloorKey(task.floor || "") === floor);
-      return {
-        floor,
-        progress: averageProgress(floorTasks),
-        count: floorTasks.length,
-        done: floorTasks.filter((task) => Number(task.progress || 0) >= 100 || task.actual).length
-      };
-    });
-    return {
-      building,
-      progress: averageProgress(items),
-      count: items.length,
-      done: items.filter((task) => Number(task.progress || 0) >= 100 || task.actual).length,
-      floors,
-      floorRows
-    };
-  });
-  if (els.elevatorSummary) {
-    els.elevatorSummary.textContent = `${rows.length} 栋楼｜${elevatorTasks.length} 个电梯节点`;
-  }
-  const html = rows.length
-    ? rows.map((row) => `
-      <article class="elevator-card">
-        <strong>${escapeHtml(row.building)}</strong>
-        <span><i style="width:${row.progress}%"></i></span>
-        <small>${row.progress}%｜完成 ${row.done}/${row.count}｜${escapeHtml(row.floors.join("、") || "未填楼层")}</small>
-        <div class="elevator-floor-list">
-          ${row.floorRows.map((floor) => `
-            <em>${escapeHtml(floor.floor || "未填楼层")}：${floor.progress}%｜${floor.done}/${floor.count}</em>
-          `).join("")}
-        </div>
-      </article>
-    `).join("")
-    : `<article class="elevator-card"><strong>暂无电梯数据</strong><small>导入电梯单位模板后显示。</small></article>`;
-  els.elevatorGrid.innerHTML = html;
-  stateCache.projectItems.set(cacheKey, { summary: els.elevatorSummary?.textContent || "", html });
-}
-
-function isBasementElevatorTask(task) {
-  const buildingText = String(task.building || task.name || "");
-  const floorText = String(task.floor || "");
-  const resolvedBuilding = resolveBuildingName(buildingText);
-  const normalizedBuilding = normalizedBuildingKey(task);
-  if (buildingText.includes("地下")) return true;
-  if (resolvedBuilding === "地下室" || normalizedBuilding === "地下室") return true;
-  if (floorText.includes("地下") || normalizedFloorKey(floorText) === "地下室") return true;
-  if (String(task.owner || task.discipline || "").includes("地下室")) return true;
-  return false;
 }
 
 function renderDictionaryPanel(scope) {
@@ -207,7 +132,7 @@ function renderScopeMaintenance(scope) {
         <article class="scope-maintenance-item unit">
           <div>
             <strong>${escapeHtml(unit.name)}｜${escapeHtml(unit.code || "UNIT")}</strong>
-            <small>${unit.systems.map((system) => escapeHtml(system)).join("、") || "暂无施工内容"}</small>
+            <small>${unit.statType === "quantity" ? "数量型统计" : "节点型统计"}｜${unit.systems.map((system) => escapeHtml(system)).join("、") || "暂无施工内容"}</small>
           </div>
           <div class="scope-item-actions">
             <button type="button" data-edit-unit="${escapeAttr(unit.name)}">编辑</button>
@@ -252,9 +177,7 @@ function currentScopeUnitRows(scope, tasks) {
   if (!stateCache.projectItems.has(cacheKey)) {
     const rows = scope.units.map((unit) => {
       const unitTasks = tasks.filter((task) => taskMatchesUnit(task, unit));
-      const progress = unitTasks.length
-        ? Math.round(unitTasks.reduce((sum, task) => sum + Number(task.progress || 0), 0) / unitTasks.length)
-        : 0;
+      const progress = unitTasks.length ? averageProgress(unitTasks) : 0;
       return { unit, unitTasks, progress, detailRows: buildUnitProgressRows(unitTasks) };
     });
     stateCache.projectItems.set(cacheKey, rows);

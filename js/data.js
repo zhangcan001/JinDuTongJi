@@ -61,14 +61,19 @@ const demoState = {
         { name: "B1", floors: 11 },
         { name: "B2", floors: 11 },
         { name: "B3", floors: 11 },
-        { name: "B4", floors: 11 },
+        { name: "B4", floors: 8 },
         { name: "B5", floors: 6 }
       ],
       units: [
         {
           name: "机电单位",
           code: "MEP",
+          statType: "task",
           systems: [
+            "导管内穿线",
+            "机电末端设备安装",
+            "机电桥架安装",
+            "机电线缆敷设",
             "室内给水系统",
             "热水系统",
             "室内排水系统",
@@ -81,6 +86,7 @@ const demoState = {
         {
           name: "消防单位",
           code: "FIRE",
+          statType: "task",
           systems: [
             "喷淋系统",
             "消火栓系统",
@@ -96,17 +102,13 @@ const demoState = {
         {
           name: "智能化单位",
           code: "IBMS",
+          statType: "task",
           systems: [
             "智能化桥架敷设",
             "智能化线缆敷设",
             "导管内穿线",
             "智能化末端设备安装"
           ]
-        },
-        {
-          name: "电梯单位",
-          code: "LIFT",
-          systems: ["设备安装"]
         }
       ]
     },
@@ -117,7 +119,7 @@ const demoState = {
         { name: "综合楼", floors: 4 }
       ],
       units: [
-        { name: "施工总承包", code: "GC", systems: ["基础工程", "主体结构", "装饰装修"] }
+        { name: "施工总承包", code: "GC", statType: "task", systems: ["基础工程", "主体结构", "装饰装修"] }
       ]
     }
   },
@@ -209,7 +211,7 @@ const demoState = {
   ]
 };
 
-const FLOOR_DEMO_SOURCE = "floor-demo-v2";
+const FLOOR_DEMO_SOURCE = "floor-demo-v3";
 
 function createFloorDemoTasks(projectId = "p1") {
   const buildings = [
@@ -218,7 +220,7 @@ function createFloorDemoTasks(projectId = "p1") {
     { name: "B1", floors: 11 },
     { name: "B2", floors: 11 },
     { name: "B3", floors: 11 },
-    { name: "B4", floors: 11 },
+    { name: "B4", floors: 8 },
     { name: "B5", floors: 6 }
   ];
   const units = [
@@ -226,6 +228,10 @@ function createFloorDemoTasks(projectId = "p1") {
       discipline: "\u673a\u7535",
       owner: "\u673a\u7535\u5355\u4f4d",
       systems: [
+        "\u5bfc\u7ba1\u5185\u7a7f\u7ebf",
+        "\u673a\u7535\u672b\u7aef\u8bbe\u5907\u5b89\u88c5",
+        "\u673a\u7535\u6865\u67b6\u5b89\u88c5",
+        "\u673a\u7535\u7ebf\u7f06\u6577\u8bbe",
         "\u5ba4\u5185\u7ed9\u6c34\u7cfb\u7edf",
         "\u70ed\u6c34\u7cfb\u7edf",
         "\u5ba4\u5185\u6392\u6c34\u7cfb\u7edf",
@@ -242,6 +248,7 @@ function createFloorDemoTasks(projectId = "p1") {
         "\u55b7\u6dcb\u7cfb\u7edf",
         "\u6d88\u706b\u6813\u7cfb\u7edf",
         "\u81ea\u52a8\u8ddf\u8e2a\u706d\u706b\u7cfb\u7edf",
+        "\u6c34\u7cfb\u7edf\u672b\u7aef\u8bbe\u5907\u5b89\u88c5",
         "\u6865\u67b6\u6577\u8bbe",
         "\u7535\u7f06\u6577\u8bbe",
         "\u5bfc\u7ba1\u5185\u7a7f\u7ebf",
@@ -258,11 +265,6 @@ function createFloorDemoTasks(projectId = "p1") {
         "\u5bfc\u7ba1\u5185\u7a7f\u7ebf",
         "\u667a\u80fd\u5316\u672b\u7aef\u8bbe\u5907\u5b89\u88c5"
       ]
-    },
-    {
-      discipline: "\u7535\u68af",
-      owner: "\u7535\u68af\u5355\u4f4d",
-      systems: ["\u8bbe\u5907\u5b89\u88c5"]
     }
   ];
   const tasks = [];
@@ -299,8 +301,7 @@ function createFloorDemoTasks(projectId = "p1") {
   [
     ["\u673a\u7535", "\u673a\u7535\u5355\u4f4d", "\u5ba4\u5185\u7ed9\u6c34\u7cfb\u7edf", 82],
     ["\u6d88\u9632", "\u6d88\u9632\u5355\u4f4d", "\u55b7\u6dcb\u7cfb\u7edf", 76],
-    ["\u667a\u80fd\u5316", "\u667a\u80fd\u5316\u5355\u4f4d", "\u667a\u80fd\u5316\u7ebf\u7f06\u6577\u8bbe", 58],
-    ["\u7535\u68af", "\u7535\u68af\u5355\u4f4d", "\u8bbe\u5907\u5b89\u88c5", 34]
+    ["\u667a\u80fd\u5316", "\u667a\u80fd\u5316\u5355\u4f4d", "\u667a\u80fd\u5316\u7ebf\u7f06\u6577\u8bbe", 58]
   ].forEach(([discipline, owner, system, progress], index) => {
     tasks.push({
       id: createId(),

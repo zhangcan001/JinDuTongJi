@@ -72,20 +72,24 @@ function summarizeState(state) {
 }
 
 function rebuildIndexes(state, updatedAt) {
-  clearProjects.run();
-  clearScopes.run();
-  clearTasks.run();
-  clearIssues.run();
-  clearAuditLogs.run();
-
   const archived = new Set(state.archivedProjectIds || []);
+  const projectIds = new Set();
   for (const project of state.projects || []) {
+    projectIds.add(String(project.id));
     insertProject.run(String(project.id), String(project.name), archived.has(project.id) ? 1 : 0, updatedAt);
   }
+  pruneMissingRows("projects", "id", projectIds);
+
+  const scopeIds = new Set();
   for (const [projectId, scope] of Object.entries(state.projectScopes || {})) {
+    scopeIds.add(String(projectId));
     insertScope.run(projectId, JSON.stringify(scope || {}), updatedAt);
   }
+  pruneMissingRows("project_scopes", "project_id", scopeIds);
+
+  const taskIds = new Set();
   for (const task of state.tasks || []) {
+    taskIds.add(String(task.id));
     insertTask.run(
       String(task.id),
       String(task.projectId),
@@ -102,7 +106,11 @@ function rebuildIndexes(state, updatedAt) {
       updatedAt
     );
   }
+  pruneMissingRows("tasks", "id", taskIds);
+
+  const issueIds = new Set();
   for (const issue of state.issues || []) {
+    issueIds.add(String(issue.id));
     insertIssue.run(
       String(issue.id),
       String(issue.projectId || ""),
@@ -114,9 +122,14 @@ function rebuildIndexes(state, updatedAt) {
       updatedAt
     );
   }
+  pruneMissingRows("issues", "id", issueIds);
+
+  const auditIds = new Set();
   for (const log of state.auditLogs || []) {
+    const id = String(log.id || `${log.time}-${log.action}`);
+    auditIds.add(id);
     insertAuditLog.run(
-      String(log.id || `${log.time}-${log.action}`),
+      id,
       log.projectId || "",
       String(log.action || "操作"),
       log.role || "",
@@ -124,6 +137,18 @@ function rebuildIndexes(state, updatedAt) {
       log.time || updatedAt
     );
   }
+  pruneMissingRows("audit_logs", "id", auditIds);
+}
+
+function pruneMissingRows(table, column, keepIds) {
+  if (!keepIds.size) {
+    db.prepare(`DELETE FROM ${table}`).run();
+    return;
+  }
+  const existing = db.prepare(`SELECT ${column} AS id FROM ${table}`).all().map((row) => String(row.id));
+  const remove = existing.filter((id) => !keepIds.has(id));
+  const statement = db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`);
+  for (const id of remove) statement.run(id);
 }
 
 function ensureAppStateVersionColumn() {

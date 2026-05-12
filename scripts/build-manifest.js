@@ -4,6 +4,12 @@ const path = require("node:path");
 
 const root = path.resolve(__dirname, "..");
 const include = ["index.html", "styles.css", "manifest.json", "sw.js", "js", "assets"];
+const vendorMetadata = {
+  "js/vendor/xlsx.full.min.js": {
+    package: "xlsx",
+    purpose: "Local Excel import/export runtime loaded on demand by js/import-loader.js"
+  }
+};
 const files = [];
 
 function collect(target) {
@@ -26,6 +32,7 @@ function collect(target) {
 include.forEach(collect);
 const manifest = {
   generatedAt: new Date().toISOString(),
+  vendor: vendorMetadata,
   files: files.sort((a, b) => a.path.localeCompare(b.path))
 };
 

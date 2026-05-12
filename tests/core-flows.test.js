@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
@@ -57,6 +58,7 @@ loadScripts(context, [
   "js/import-apply.js",
   "js/import-template.js",
   "js/scope-maintenance.js",
+  "js/scope-model.js",
   "js/import-excel.js"
 ]);
 
@@ -70,6 +72,8 @@ vm.runInContext(`
     applyImportedRows,
     stageImportedRowsForReview,
     readWorkbookRows,
+    inferImportFieldMap,
+    buildImportHeaderMap,
     isImportFileTooLarge,
     migrateState,
     currentProjectItems,
@@ -80,7 +84,7 @@ vm.runInContext(`
     splitScopedSystem,
     normalizedOwnerKey,
     taskMatchesScopeUnit,
-    isBasementElevatorTask,
+    averageProgress,
     runCanvasModelLoop: globalThis.runCanvasModelLoop,
     drawCanvasBuildingModel: globalThis.drawCanvasBuildingModel
   };
@@ -131,6 +135,36 @@ assert.equal(workbookRows.length, 1);
 assert.equal(workbookRows[0].来源工作表, "机电单位");
 assert.equal(api.normalizeImportRow(workbookRows[0]).system, "真实Excel解析测试");
 
+const looseWorkbook = context.XLSX.utils.book_new();
+context.XLSX.utils.book_append_sheet(looseWorkbook, context.XLSX.utils.aoa_to_sheet([
+  ["汽车科技总部产业园进度统计表"],
+  ["填报日期", "2026-05-12"],
+  ["楼号名称", "所在楼层", "责任班组", "作业内容", "计划完工日期", "当前状态", "完成比例", "情况说明"],
+  ["B1", "3层", "消防单位", "喷淋系统", "2026/05/30", "施工中", "45%", "材料已进场"]
+]), "周报统计");
+const looseRows = api.readWorkbookRows(looseWorkbook);
+assert.equal(looseRows.length, 1);
+assert.equal(looseRows[0].__importRowNumber, 4);
+const looseMap = api.inferImportFieldMap(looseRows);
+assert.equal(looseMap.building, "楼号名称");
+assert.equal(looseMap.floor, "所在楼层");
+assert.equal(looseMap.owner, "责任班组");
+assert.equal(looseMap.system, "作业内容");
+assert.equal(looseMap.planned, "计划完工日期");
+assert.equal(looseMap.completionStatus, "当前状态");
+assert.equal(looseMap.progress, "完成比例");
+const looseNormalized = api.normalizeImportRow({
+  ...looseRows[0],
+  __importHeaderMap: api.buildImportHeaderMap(looseRows)
+});
+assert.equal(looseNormalized.building, "B1");
+assert.equal(looseNormalized.floor, "3层");
+assert.equal(looseNormalized.owner, "消防单位");
+assert.equal(looseNormalized.system, "喷淋系统");
+assert.equal(looseNormalized.planned, "2026-05-30");
+assert.equal(looseNormalized.progress, 50);
+assert.equal(looseNormalized.note, "材料已进场");
+
 const validation = api.validateImportRows([
   {
     项目: "城东综合体一期",
@@ -155,8 +189,8 @@ const validation = api.validateImportRows([
 
 assert.equal(validation.validRows.length, 1);
 assert.equal(validation.invalidRows.length, 1);
-assert.ok(validation.invalidRows[0].problems.some((item) => item.includes("楼层超出楼栋范围")));
 assert.ok(validation.invalidRows[0].problems.some((item) => item.includes("实际完成情况只能为")));
+assert.ok(validation.warnings.some((item) => item.includes("A1 层数将按导入表更新为 99 层")));
 
 const percentStatus = api.normalizeImportRow({
   楼栋: "A1",
@@ -228,9 +262,38 @@ assert.equal(api.applyImportedRows(importRows, "updateOnly").skipped, 1);
 assert.equal(context.state.tasks.length, beforeImportCount);
 assert.equal(api.applyImportedRows(importRows, "appendOnly").created, 1);
 assert.equal(api.applyImportedRows(importRows, "appendOnly").skipped, 1);
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1");
 const staged = api.stageImportedRowsForReview([{ ...importRows[0], 施工内容: "UI待复核系统" }], "review.csv");
 assert.equal(staged.created, 1);
 assert.ok(context.state.pendingImports.some((item) => item.fileName === "review.csv"));
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1");
+const floorSyncResult = api.applyImportedRows([{
+  ...importRows[0],
+  楼栋: "A2",
+  楼层: "9层",
+  施工内容: "楼层同步测试"
+}], "appendOnly", { scope: "current", updatePolicy: "all", duplicatePolicy: "last" });
+assert.equal(floorSyncResult.created, 1);
+assert.equal(context.state.projectScopes.p1.buildings.find((building) => building.name === "A2").floors, 9);
+const newBuildingSyncResult = api.applyImportedRows([{
+  ...importRows[0],
+  楼栋: "C1",
+  楼层: "12层",
+  施工内容: "新增楼栋层数测试"
+}], "appendOnly", { scope: "current", updatePolicy: "all", duplicatePolicy: "last" });
+assert.equal(newBuildingSyncResult.created, 1);
+const c1ScopeBuilding = context.state.projectScopes.p1.buildings.find((building) => building.name === "C1");
+assert.equal(c1ScopeBuilding.name, "C1");
+assert.equal(c1ScopeBuilding.floors, 12);
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1,A2:9,C1:12");
+const elevatorImportResult = api.applyImportedRows([{
+  ...importRows[0],
+  施工单位: "电梯单位",
+  施工内容: "电梯轿厢安装"
+}], "appendOnly", { scope: "current", updatePolicy: "all", duplicatePolicy: "last" });
+assert.equal(elevatorImportResult.created, 0);
+assert.equal(elevatorImportResult.skipped, 1);
+assert.equal(context.state.tasks.some((task) => `${task.owner || ""}${task.system || ""}`.includes("电梯")), false);
 
 const scopedImportRow = {
   项目: "表内新项目",
@@ -285,15 +348,33 @@ assert.equal(api.taskMatchesScopeUnit(smartWireTask, smartUnit), true);
 const splitSmartSystem = api.splitScopedSystem("智能化单位｜导管内穿线");
 assert.equal(splitSmartSystem.owner, "智能化单位");
 assert.equal(splitSmartSystem.system, "导管内穿线");
-const elevatorImport = api.applyImportedRows([
-  { 项目: "城东综合体一期", 楼栋: "A1", 专业: "电梯", 施工单位: "电梯单位", 电梯数量: "2", 已安装数量: "1", 完成百分比: "50%" },
-  { 项目: "城东综合体一期", 楼栋: "A2", 专业: "电梯", 施工单位: "电梯单位", 电梯数量: "2", 已安装数量: "2", 完成百分比: "100%" }
-], "upsert", { scope: "current", updatePolicy: "all", duplicatePolicy: "last" });
-assert.equal(elevatorImport.created + elevatorImport.updated, 2);
-assert.ok(context.state.tasks.some((task) => task.owner === "电梯单位" && task.building === "A1" && task.floor === "整栋" && task.progress === 50));
-assert.ok(context.state.tasks.some((task) => task.owner === "电梯单位" && task.building === "A2" && task.floor === "整栋" && task.progress === 100));
-assert.equal(api.isBasementElevatorTask({ owner: "电梯单位", building: "地下室", floor: "地下1层", system: "设备安装" }), true);
-assert.equal(api.isBasementElevatorTask({ owner: "电梯单位", building: "A1", floor: "1层", system: "设备安装" }), false);
+assert.equal(api.averageProgress([
+  { owner: "机电单位", system: "设备安装", progress: 20 },
+  { owner: "机电单位", system: "管线安装", progress: 100 }
+]), 60);
+
+const desktopTemplate = path.join(os.homedir(), "Desktop", "进度导入模板-汽车科技总部产业园-2026-05-11.xlsx");
+if (fs.existsSync(desktopTemplate)) {
+  const workbook = context.XLSX.read(fs.readFileSync(desktopTemplate), { type: "buffer", cellDates: true });
+  const templateRows = api.readWorkbookRows(workbook);
+  assert.ok(templateRows.length > 100, "provided workbook should parse data rows");
+  const mepRow = templateRows.find((row) => row.来源工作表 === "机电单位" && row.施工内容 === "导管内穿线");
+  const normalizedMep = api.normalizeImportRow(mepRow);
+  assert.equal(normalizedMep.owner, "机电单位");
+  assert.equal(normalizedMep.system, "导管内穿线");
+  assert.equal(normalizedMep.progress, 10);
+  ["机电单位", "消防单位", "智能化单位"].forEach((unitName) => {
+    const unit = context.state.projectScopes.p1.units.find((item) => item.name === unitName);
+    const templateSystems = new Set(templateRows
+      .filter((row) => row.来源工作表 === unitName && row.施工内容)
+      .map((row) => row.施工内容));
+    templateSystems.forEach((system) => {
+      assert.ok(unit.systems.includes(system), `${unitName} should include template system ${system}`);
+    });
+  });
+  const removedUnitSheetName = `${String.fromCharCode(30005, 26799)}单位`;
+  assert.equal(templateRows.some((row) => row.来源工作表 === removedUnitSheetName), false);
+}
 const conflictPolicyResult = api.applyImportedRows([
   { ...scopedImportRow, 施工内容: "冲突策略测试", 实际完成情况: "施工中" },
   { ...scopedImportRow, 施工内容: "冲突策略测试", 实际完成情况: "已完成" }
@@ -304,16 +385,35 @@ assert.equal(context.state.tasks.some((task) => task.system === "冲突策略测
 const migrated = api.migrateState({
   projects: [{ id: "p-custom", name: "测试项目" }],
   selectedProjectId: "p-custom",
-  projectScopes: {},
-  tasks: [{ id: "t-1", projectId: "p-custom", name: "节点", planned: "2026-05-01", progress: 25 }],
-  issues: [{ id: "i-1", projectId: "p-custom", title: "问题", action: "材料未进场", status: "跟踪中" }]
+  projectScopes: {
+    "p-custom": {
+      basement: "",
+      buildings: [{ name: "A1", floors: 3 }],
+      units: [
+        { name: "电梯单位", code: "LIFT", systems: ["电梯安装"] },
+        { name: "机电单位", code: "MEP", systems: ["室内给水系统", "电梯厅照明"] }
+      ]
+    }
+  },
+  tasks: [
+    { id: "t-1", projectId: "p-custom", name: "节点", planned: "2026-05-01", progress: 25 },
+    { id: "t-elevator", projectId: "p-custom", name: "电梯调试", owner: "电梯单位", system: "曳引机安装", planned: "2026-05-02", progress: 10 }
+  ],
+  issues: [
+    { id: "i-1", projectId: "p-custom", title: "问题", action: "材料未进场", status: "跟踪中" },
+    { id: "i-elevator", projectId: "p-custom", title: "电梯井道整改", action: "电梯安装滞后", status: "跟踪中" }
+  ]
 });
 
 assert.equal(migrated.currentRole, "admin");
 assert.equal(migrated.uiPreferences.activeView, "dashboard");
 assert.equal(migrated.tasks.find((task) => task.id === "t-1").reviewStatus, "approved");
+assert.equal(migrated.tasks.some((task) => task.id === "t-elevator"), false);
 assert.equal(migrated.issues[0].status, "整改中");
 assert.equal(migrated.issues[0].category, "材料");
+assert.equal(migrated.issues.some((issue) => issue.id === "i-elevator"), false);
+assert.equal(migrated.projectScopes["p-custom"].units.some((unit) => unit.name.includes("电梯")), false);
+assert.equal(migrated.projectScopes["p-custom"].units[0].systems.some((system) => system.includes("电梯")), false);
 
 const legacyFixture = JSON.parse(fs.readFileSync(path.join(root, "tests", "fixtures", "state-v1-minimal.json"), "utf8"));
 const migratedFixture = api.migrateState(legacyFixture);

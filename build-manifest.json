@@ -1,20 +1,26 @@
 {
-  "generatedAt": "2026-05-11T16:18:21.435Z",
+  "generatedAt": "2026-05-12T13:50:17.104Z",
+  "vendor": {
+    "js/vendor/xlsx.full.min.js": {
+      "package": "xlsx",
+      "purpose": "Local Excel import/export runtime loaded on demand by js/import-loader.js"
+    }
+  },
   "files": [
     {
       "path": "assets/progress-template.xlsx",
-      "bytes": 41418,
-      "hash": "53aa0467fd05282c"
+      "bytes": 377447,
+      "hash": "013021baeec8db1d"
     },
     {
       "path": "index.html",
-      "bytes": 40839,
-      "hash": "8169a89e02d723c1"
+      "bytes": 39141,
+      "hash": "2d32616e1c423475"
     },
     {
       "path": "js/app-core.js",
-      "bytes": 388,
-      "hash": "553089fde356bc3a"
+      "bytes": 402,
+      "hash": "9956f60cb5efe281"
     },
     {
       "path": "js/basement-view.js",
@@ -23,23 +29,23 @@
     },
     {
       "path": "js/business-rules.js",
-      "bytes": 3505,
-      "hash": "de61d368a1e67149"
+      "bytes": 3607,
+      "hash": "94626cd95b410297"
     },
     {
       "path": "js/dashboard.js",
-      "bytes": 21751,
-      "hash": "8b3df12006b24d8b"
+      "bytes": 21780,
+      "hash": "030d38dcf6b15ddd"
     },
     {
       "path": "js/data.js",
-      "bytes": 11347,
-      "hash": "d6d0c7d442f95646"
+      "bytes": 11524,
+      "hash": "fb94977146042be1"
     },
     {
       "path": "js/dom.js",
-      "bytes": 11598,
-      "hash": "37b9d8ff0b8a8aa8"
+      "bytes": 10942,
+      "hash": "8de3788e13d06b77"
     },
     {
       "path": "js/error-reporting.js",
@@ -48,53 +54,53 @@
     },
     {
       "path": "js/import-apply.js",
-      "bytes": 10797,
-      "hash": "d2ef2367445d3f4f"
+      "bytes": 13119,
+      "hash": "5c7997a04bb97e72"
     },
     {
       "path": "js/import-excel.js",
-      "bytes": 3689,
-      "hash": "3593bfbe26600e19"
+      "bytes": 3943,
+      "hash": "6808c596f2c20134"
     },
     {
       "path": "js/import-file-reader.js",
-      "bytes": 3229,
-      "hash": "ab87c9e01d158792"
+      "bytes": 5049,
+      "hash": "e57cf93467ce7a7a"
     },
     {
       "path": "js/import-loader.js",
-      "bytes": 2179,
-      "hash": "b5ea2c4e32a8ef94"
+      "bytes": 2208,
+      "hash": "569ef2a7844a86d1"
     },
     {
       "path": "js/import-normalize.js",
-      "bytes": 8557,
-      "hash": "bdc033b34a6b6f7d"
+      "bytes": 15254,
+      "hash": "a356ae0ed3414b76"
     },
     {
       "path": "js/import-options.js",
-      "bytes": 1703,
-      "hash": "7b4177505c6438e8"
+      "bytes": 2534,
+      "hash": "5dfe76bc51b98a4b"
     },
     {
       "path": "js/import-preview.js",
-      "bytes": 22603,
-      "hash": "9653f8fd1a16b92b"
+      "bytes": 23869,
+      "hash": "124e0df8d3e42a84"
     },
     {
       "path": "js/import-template.js",
-      "bytes": 15726,
-      "hash": "7a6a9996a57a1b17"
+      "bytes": 15308,
+      "hash": "358e0e2695733bfc"
     },
     {
       "path": "js/import-worker.js",
-      "bytes": 1075,
-      "hash": "c090b61d9024e781"
+      "bytes": 4303,
+      "hash": "cf63b47050b87406"
     },
     {
       "path": "js/main.js",
-      "bytes": 31086,
-      "hash": "71369d0036ba29e6"
+      "bytes": 30528,
+      "hash": "128f18a6751284ff"
     },
     {
       "path": "js/progress-chart.js",
@@ -103,48 +109,48 @@
     },
     {
       "path": "js/project-helpers.js",
-      "bytes": 7588,
-      "hash": "8ec4949d78c3d5f5"
+      "bytes": 9854,
+      "hash": "e62b078bba609f84"
     },
     {
       "path": "js/records-chart.js",
-      "bytes": 38413,
-      "hash": "7169f1449e7b5041"
+      "bytes": 38432,
+      "hash": "274ad0ced47e5857"
     },
     {
       "path": "js/scope-maintenance.js",
-      "bytes": 22485,
-      "hash": "af87025522a82fcc"
+      "bytes": 18954,
+      "hash": "99fa2cc3284c1f4a"
     },
     {
       "path": "js/scope-model.js",
-      "bytes": 39307,
-      "hash": "5916706de14e5f59"
+      "bytes": 39422,
+      "hash": "fd3f9324faa243d4"
     },
     {
       "path": "js/state-import.js",
-      "bytes": 25136,
-      "hash": "b0e7227477761a22"
+      "bytes": 28668,
+      "hash": "1d884ef0c2ab53b3"
     },
     {
       "path": "js/storage-audit.js",
-      "bytes": 41460,
-      "hash": "cdb9e3003d9c8708"
+      "bytes": 39718,
+      "hash": "b7ae8413569cc8ea"
     },
     {
       "path": "js/storage-core.js",
-      "bytes": 4866,
-      "hash": "1846535f3e1c0983"
+      "bytes": 6325,
+      "hash": "645ad876d715360c"
     },
     {
       "path": "js/sw-assets.js",
       "bytes": 939,
-      "hash": "e6a7e3ae16274a98"
+      "hash": "6936efa232249812"
     },
     {
       "path": "js/ui-dialogs.js",
-      "bytes": 2898,
-      "hash": "b92b021ce7ac8897"
+      "bytes": 2908,
+      "hash": "8a519e67681f1ca3"
     },
     {
       "path": "js/validation-schema.js",
@@ -158,18 +164,18 @@
     },
     {
       "path": "manifest.json",
-      "bytes": 306,
-      "hash": "f4186785057ede48"
+      "bytes": 317,
+      "hash": "1d985e2552d9b659"
     },
     {
       "path": "styles.css",
-      "bytes": 68505,
-      "hash": "3a1ba84671c29448"
+      "bytes": 67301,
+      "hash": "dd39599a826d6224"
     },
     {
       "path": "sw.js",
-      "bytes": 1768,
-      "hash": "61c0e5ff0ced1b18"
+      "bytes": 1778,
+      "hash": "d86fdc9707f29dee"
     }
   ]
 }

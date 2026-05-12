@@ -15,11 +15,12 @@ let backendRetryAttempt = 0;
 let backendSaveInFlight = false;
 let pendingBackendAuditQueue = [];
 let backendApiUnavailable = false;
-let backendAuthState = { enabled: false, authenticated: false, loading: true };
 let backendPageStats = null;
+let backendConflict = null;
 
 const BACKEND_PENDING_STATE_KEY = `${STORAGE_KEY}:pending-backend-state`;
 const BACKEND_PENDING_AUDIT_KEY = `${STORAGE_KEY}:pending-backend-audit`;
+const BACKEND_KEEPALIVE_BODY_LIMIT = 60 * 1024;
 
 function loadState() {
   try {
@@ -36,14 +37,15 @@ function loadState() {
 
 function saveState(options = {}) {
   try {
-    pendingLocalStateSnapshot = JSON.stringify(state);
+    const snapshotState = compactStateForStorage(state);
+    pendingLocalStateSnapshot = JSON.stringify(snapshotState);
     if (options.immediate) {
       flushLocalStateWrite();
     } else {
       clearTimeout(pendingLocalStateWriteTimer);
       pendingLocalStateWriteTimer = setTimeout(flushLocalStateWrite, 120);
     }
-    invalidateStateCache();
+    invalidateStateCache(options.scope || options.refresh || "all");
     scheduleStateMirrorToIndexedDB();
     scheduleStateMirrorToBackend(options);
   } catch {
@@ -117,10 +119,47 @@ function showToast(message, tone = "ok") {
   showToast.timer = setTimeout(() => els.toast.classList.remove("show"), 2400);
 }
 
-function invalidateStateCache() {
+function invalidateStateCache(scope = "all") {
   if (!stateCache) return;
   stateCache.version += 1;
+  if (scope !== "all" && state.selectedProjectId) {
+    invalidateStateCacheByScope(scope, state.selectedProjectId);
+    return;
+  }
   stateCache.projectItems = new Map();
+}
+
+function invalidateStateCacheByScope(scope, projectId) {
+  const prefixes = {
+    tasks: [`tasks:${projectId}`, `index:tasks:${projectId}`, `filtered:${projectId}`],
+    issues: [`issues:${projectId}`, `index:issues:${projectId}`],
+    scope: [`scope:${projectId}`, `model-tasks:${projectId}`, `basement:${projectId}`, `dictionary:${projectId}`],
+    data: [`tasks:${projectId}`, `issues:${projectId}`, `index:tasks:${projectId}`, `index:issues:${projectId}`, `filtered:${projectId}`, `scope:${projectId}`],
+    prefs: ["filtered:"]
+  }[scope] || [];
+  if (!prefixes.length) {
+    stateCache.projectItems = new Map();
+    return;
+  }
+  for (const key of [...stateCache.projectItems.keys()]) {
+    if (prefixes.some((prefix) => key.startsWith(prefix) || key.includes(prefix))) stateCache.projectItems.delete(key);
+  }
+}
+
+function compactStateForStorage(source) {
+  const next = cloneData(source);
+  stripDerivedTaskFields(next.tasks);
+  stripDerivedTaskFields(next.pendingImports?.map((item) => item.task));
+  return next;
+}
+
+function stripDerivedTaskFields(tasks) {
+  (tasks || []).forEach((task) => {
+    delete task._searchText;
+    delete task._statusClass;
+    delete task._buildingKey;
+    delete task._ownerKey;
+  });
 }
 
 function recordEntityHistory(entityType, entityId, title, changes, summary = "") {

@@ -2,8 +2,72 @@ function currentRole() {
   return state.currentRole || "admin";
 }
 
+const LEGACY_REMOVED_UNIT_NAME = String.fromCharCode(30005, 26799);
+const LEGACY_REMOVED_UNIT_CODE = String.fromCharCode(76, 73, 70, 84);
+const ELEVATOR_RELATED_PATTERN = /电梯|扶梯|客梯|货梯|消防梯|无障碍梯|观光梯|自动扶梯|曳引|轿厢|梯控|电梯厅|电梯井|井道门|层门|厅门门套/i;
+
+function hasRemovedUnitText(value) {
+  const text = String(value || "");
+  return text.includes(LEGACY_REMOVED_UNIT_NAME)
+    || text.toUpperCase() === LEGACY_REMOVED_UNIT_CODE
+    || ELEVATOR_RELATED_PATTERN.test(text);
+}
+
+function removedContentText(item, fields) {
+  if (!item) return "";
+  return fields.map((field) => item[field] || "").join(" ");
+}
+
+function sanitizeRemovedScopeContent(scope) {
+  scope.units = (scope.units || [])
+    .filter((unit) => !hasRemovedUnitText(removedContentText(unit, ["name", "code"])))
+    .map((unit) => ({
+      ...unit,
+      systems: (unit.systems || []).filter((system) => !hasRemovedUnitText(system)),
+      statType: unit.statType || "task"
+    }));
+  return scope;
+}
+
+function taskHasRemovedContent(task) {
+  return hasRemovedUnitText(removedContentText(task, ["name", "owner", "discipline", "building", "floor", "system", "note"]));
+}
+
+function issueHasRemovedContent(issue) {
+  return hasRemovedUnitText(removedContentText(issue, ["title", "owner", "action", "reviewNote", "delayReason"]));
+}
+
+function normalizedImportHasRemovedContent(normalized) {
+  return hasRemovedUnitText(removedContentText(normalized, ["name", "owner", "discipline", "building", "floor", "system", "note"]));
+}
+
+function applyKnownBuildingFloorCorrections(nextState) {
+  const corrections = new Map([["B4", 8]]);
+  const correctedBuildingName = (value) => {
+    const text = String(value || "");
+    return [...corrections.keys()].find((name) => text.includes(name)) || "";
+  };
+  Object.values(nextState.projectScopes || {}).forEach((scope) => {
+    (scope.buildings || []).forEach((building) => {
+      if (corrections.has(building.name)) building.floors = corrections.get(building.name);
+    });
+  });
+  nextState.tasks = (nextState.tasks || []).filter((task) => {
+    const buildingName = correctedBuildingName(`${task.building || ""}${task.name || ""}`);
+    const correctedFloors = corrections.get(buildingName);
+    if (!correctedFloors || task.source !== "floor-demo-v3") return true;
+    return parseFloorNumber(task.floor) <= correctedFloors;
+  });
+  nextState.tasks.forEach((task) => {
+    const buildingName = correctedBuildingName(`${task.building || ""}${task.name || ""}`);
+    const correctedFloors = corrections.get(buildingName);
+    if (correctedFloors && String(task.building || "").includes(buildingName)) {
+      task.building = `${buildingName}（${correctedFloors}层）`;
+    }
+  });
+}
+
 function canEditData() {
-  if (backendAuthState?.enabled && !backendAuthState.authenticated) return false;
   return currentRole() !== "viewer";
 }
 
@@ -19,10 +83,6 @@ function roleLabel(role = currentRole()) {
 
 function ensureCanEdit(action = "执行此操作") {
   if (canEditData()) return true;
-  if (backendAuthState?.enabled && !backendAuthState.authenticated) {
-    showAuthPrompt(`请先登录后再${action}。`);
-    return false;
-  }
   notifyUser(`当前为只读查看角色，不能${action}。`);
   return false;
 }
@@ -37,6 +97,7 @@ function currentProjectItems(key) {
   const cacheKey = `${key}:${state.selectedProjectId}:${currentRole()}:${state.selectedContractorUnit || "all"}`;
   if (!stateCache.projectItems.has(cacheKey)) {
     const items = state[key].filter((item) => item.projectId === state.selectedProjectId);
+    if (key === "tasks") deriveTaskFieldsForList(items);
     stateCache.projectItems.set(cacheKey, items);
   }
   const items = stateCache.projectItems.get(cacheKey);
@@ -73,23 +134,14 @@ function currentProjectFilteredTasks(tasks, filters = taskFilters) {
     const queryTokens = String(filters.query || "").toLowerCase().split(/\s+/).filter(Boolean);
     const filtered = tasks
       .filter((task) => {
-        const status = getTaskStatus(task).className;
-        const building = resolveBuildingName(task.building || task.name);
-        const haystack = [
-          task.name,
-          task.note,
-          task.building,
-          task.floor,
-          task.system,
-          task.discipline,
-          task.owner,
-          task.planned,
-          task.actual
-        ].join(" ").toLowerCase();
+        deriveTaskFields(task);
+        const status = task._statusClass;
+        const building = task._buildingKey;
+        const haystack = task._searchText || "";
         if (queryTokens.length && !queryTokens.every((token) => haystack.includes(token))) return false;
         if (filters.status !== "all" && status !== filters.status) return false;
         if (filters.building !== "all" && building !== filters.building) return false;
-        if (filters.owner !== "all" && (task.owner || task.discipline || "未填单位") !== filters.owner) return false;
+        if (filters.owner !== "all" && task._ownerKey !== filters.owner) return false;
         if (!taskMatchesSmartFilter(task, filters.smart || "all")) return false;
         return true;
       })
@@ -148,23 +200,30 @@ function migrateState(nextState) {
     nextState.uiPreferences.dashboardCards = ["today", "ops", "weekly", "chart", "analytics"];
   }
   nextState.tasks = mergeFloorDemoTasks(nextState);
-  nextState.tasks = (nextState.tasks || []).map((task) => ({
+  Object.values(nextState.projectScopes || {}).forEach((scope) => {
+    sanitizeRemovedScopeContent(scope);
+  });
+  applyKnownBuildingFloorCorrections(nextState);
+  nextState.tasks = (nextState.tasks || []).filter((task) => !taskHasRemovedContent(task));
+  nextState.tasks = (nextState.tasks || []).map((task) => deriveTaskFields({
     plannedProgress: expectedProgress({ planned: task.planned, actual: task.actual }),
     reviewStatus: "approved",
     ...task
   }));
-  nextState.issues = (nextState.issues || []).map((issue) => ({
-    category: classifyDelayReason(issue.action || issue.title || ""),
-    taskId: "",
-    reviewNote: "",
-    closedAt: "",
-    rectifyCount: 0,
-    reviewResult: "",
-    delayReason: "",
-    responsiblePerson: "",
-    ...issue,
-    status: normalizeIssueStatus(issue.status)
-  }));
+  nextState.issues = (nextState.issues || [])
+    .filter((issue) => !issueHasRemovedContent(issue))
+    .map((issue) => ({
+      category: classifyDelayReason(issue.action || issue.title || ""),
+      taskId: "",
+      reviewNote: "",
+      closedAt: "",
+      rectifyCount: 0,
+      reviewResult: "",
+      delayReason: "",
+      responsiblePerson: "",
+      ...issue,
+      status: normalizeIssueStatus(issue.status)
+    }));
   nextState.diaries = nextState.diaries || [];
   nextState.meetings = nextState.meetings || [];
   if (previousSchemaVersion < 2) {
@@ -410,11 +469,37 @@ async function restoreImportVersion(versionId) {
   if (!(await confirmAction(`确定恢复到导入版本“${version.fileName}”吗？`, { title: "恢复导入版本", okText: "恢复" }))) return;
   const keepVersions = state.importVersions || [];
   const keepRestorePoints = state.restorePoints || [];
-  state = migrateState(cloneData(version.state));
-  state.importVersions = keepVersions;
-  state.restorePoints = keepRestorePoints;
+  if (version.state) {
+    state = migrateState(cloneData(version.state));
+    state.importVersions = keepVersions;
+    state.restorePoints = keepRestorePoints;
+  } else if (version.patch?.format === "task-delta-v1") {
+    restoreImportPatch(version.patch);
+  } else {
+    showToast("该导入版本缺少可恢复数据", "warn");
+    return;
+  }
   recordAudit("恢复导入版本", version.fileName);
   commitStateChange("data");
+}
+
+function restoreImportPatch(patch) {
+  const byId = new Map(state.tasks.map((task) => [task.id, task]));
+  (patch.createdTasks || []).forEach((created) => {
+    if (byId.has(created.id)) Object.assign(byId.get(created.id), created);
+    else {
+      state.tasks.push(created);
+      byId.set(created.id, created);
+    }
+  });
+  (patch.updatedAfter || []).forEach((after) => {
+    if (byId.has(after.id)) Object.assign(byId.get(after.id), after);
+    else state.tasks.push(after);
+  });
+  Object.entries(patch.scopeAfterByProject || patch.scopeBeforeByProject || {}).forEach(([projectId, scope]) => {
+    state.projectScopes[projectId] = cloneData(scope);
+  });
+  deriveTaskFieldsForList(state.tasks);
 }
 
 function renderWeightPanel() {

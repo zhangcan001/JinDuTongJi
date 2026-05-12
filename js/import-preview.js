@@ -6,32 +6,25 @@
   if (rows.length > 2500) warnings.push(`本次文件包含 ${rows.length} 行，数据量较大，建议先备份；如浏览器卡顿可按施工单位分批导入。`);
 
   rows.forEach((row, index) => {
-    const normalized = normalizeImportRow(row);
+    const normalized = importRowNormalized(row);
     const scope = importScopeForValidation(normalized, options);
     const knownBuildings = scope.buildings.map((building) => building.name);
     const knownSystems = scope.units.flatMap((unit) => unit.systems.map((system) => `${unit.name}｜${system}`));
-    const rowNumber = index + 2;
+    const rowNumber = Number(row.__importRowNumber || 0) || index + 2;
     const problems = [];
-    const isElevatorRow = String(normalized.owner || normalized.discipline).includes("电梯");
     if (!normalized.building) problems.push("缺少施工部位");
-    if (!normalized.floor && !isElevatorRow) problems.push("缺少楼层");
+    if (!normalized.floor) problems.push("缺少楼层");
     if (!normalized.system && !normalized.name) problems.push("缺少施工内容或节点名称");
     const progressText = String(normalized.progress ?? "");
     if (progressText && Number.isNaN(Number(progressText.replace("%", "")))) problems.push("完成率不是数字");
     const floorNumber = parseFloorNumber(normalized.floor);
-    const matchedBuilding = scope.buildings.find((building) => normalized.building.includes(building.name));
+    const matchedBuilding = findScopeBuilding(scope, parseBuilding(normalized.building || "").name);
     if (matchedBuilding && floorNumber && floorNumber > Number(matchedBuilding.floors || 1)) {
-      problems.push(`楼层超出楼栋范围，${matchedBuilding.name} 只有 ${matchedBuilding.floors} 层`);
+      warnings.push(`${importRowLabel(row, rowNumber)}：${matchedBuilding.name} 层数将按导入表更新为 ${floorNumber} 层`);
     }
     const status = normalized.completionStatus;
     if (status && completionStatusToProgress(status) == null) {
       problems.push("实际完成情况只能为：未开始、已完成或 0-100 完成百分比");
-    }
-    const elevatorCount = Number(pickCell(row, ["电梯数量"]) || 0);
-    const installedCount = Number(pickCell(row, ["已安装数量"]) || 0);
-    if (isElevatorRow) {
-      if (Number.isNaN(elevatorCount) || Number.isNaN(installedCount)) problems.push("电梯数量和已安装数量必须为数字");
-      if (elevatorCount && installedCount > elevatorCount) problems.push("已安装数量不能大于电梯数量");
     }
     if (normalized.planned && !isDateField(normalized.planned)) problems.push("计划完成时间格式不正确");
     if (normalized.actual && !isDateField(normalized.actual)) problems.push("实际完成时间格式不正确");
@@ -72,7 +65,7 @@ function previewImportedRows(rows) {
   const options = importOptions();
 
   rows.forEach((row) => {
-    const normalized = normalizeImportRow(row);
+    const normalized = importRowNormalized(row);
     if (!normalized.name && !normalized.system) return;
 
     const projectName = importProjectNameForRow(normalized, options);
@@ -135,8 +128,14 @@ function collectScopeSuggestions(preview, seen, scope, normalized) {
   if (normalized.building) {
     if (normalized.building.includes("地下")) {
       if (!scope.basement) add("basement", normalized.building);
-    } else if (!scope.buildings.some((building) => normalized.building.includes(building.name))) {
-      add("building", normalized.building);
+    } else {
+      const importedBuilding = buildingFromImportedLocation(normalized);
+      const existingBuilding = findScopeBuilding(scope, importedBuilding.name);
+      if (!existingBuilding) {
+        add("building", `${importedBuilding.name}（${importedBuilding.floors}层）`);
+      } else if (importedBuilding.floors > Number(existingBuilding.floors || 1)) {
+        add("building", `${existingBuilding.name}（更新为${importedBuilding.floors}层）`);
+      }
     }
   }
   const discipline = normalized.discipline || inferDiscipline(normalized.owner, normalized.system);
@@ -213,14 +212,25 @@ function recordImportHistory(result, fileName) {
     details: result.details || []
   };
   state.importHistory.unshift(record);
-  const snapshot = cloneData(state);
-  snapshot.importVersions = [];
   state.importVersions.unshift({
     ...record,
-    state: snapshot
+    patch: buildImportVersionPatch(result),
+    state: null
   });
   state.importHistory = state.importHistory.slice(0, 12);
   state.importVersions = state.importVersions.slice(0, 10);
+}
+
+function buildImportVersionPatch(result) {
+  return {
+    format: "task-delta-v1",
+    createdIds: result.createdIds || [],
+    createdTasks: result.createdTasks || [],
+    updatedBefore: result.updatedBefore || [],
+    updatedAfter: result.updatedAfter || [],
+    scopeBeforeByProject: result.scopeBeforeByProject || {},
+    scopeAfterByProject: result.scopeAfterByProject || {}
+  };
 }
 
 function renderImportDiff(result) {
@@ -288,10 +298,16 @@ function renderImportPreview(importData) {
 function renderImportImpact(result) {
   if (!els.importImpactPanel) return;
   const locations = [...new Set(result.changed.map((item) => `${item.buildingName}｜${item.floorLabel}`))];
+  const unitSummary = summarizeImportResult(result.details || [], "责任单位").slice(0, 6);
+  const buildingSummary = summarizeImportResult(result.details || [], "楼栋").slice(0, 6);
   setSafeHtml(els.importImpactPanel, safeTemplateHtml`
     <strong>导入影响报告</strong>
     <p>${escapeHtml(result.fileName || "本次导入")}：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped || 0}，全局字典变更 ${result.scopeAdded || 0}。</p>
     <p>影响位置 ${locations.length} 处${locations.length ? `：${locations.slice(0, 8).map(escapeHtml).join("、")}` : ""}</p>
+    <div class="import-impact-grid">
+      <article><strong>单位变化</strong>${unitSummary.length ? unitSummary.map((item) => `<small>${escapeHtml(item.label)}：${item.count} 条</small>`).join("") : "<small>暂无单位变化</small>"}</article>
+      <article><strong>楼栋变化</strong>${buildingSummary.length ? buildingSummary.map((item) => `<small>${escapeHtml(item.label)}：${item.count} 条</small>`).join("") : "<small>暂无楼栋变化</small>"}</article>
+    </div>
     <div class="import-preview-actions">
       <button class="ghost-btn" type="button" data-export-import-impact>导出影响报告</button>
       ${result.restorePointId ? `<button class="ghost-btn" type="button" data-undo-import="${escapeAttr(result.restorePointId)}">撤销本次导入</button>` : ""}
@@ -303,6 +319,17 @@ function renderImportImpact(result) {
   els.importImpactPanel.querySelector("[data-undo-import]")?.addEventListener("click", (event) => {
     restoreFromPoint(event.currentTarget.dataset.undoImport);
   });
+}
+
+function summarizeImportResult(details, field) {
+  const grouped = new Map();
+  (details || []).forEach((row) => {
+    const label = row[field] || "未填";
+    grouped.set(label, (grouped.get(label) || 0) + 1);
+  });
+  return Array.from(grouped.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
 function clearImportImpact() {
@@ -367,7 +394,7 @@ function renderImportPreviewDetails(preview, validation) {
           <thead><tr><th>导入</th><th>项目</th><th>楼栋</th><th>楼层</th><th>单位</th><th>施工内容</th><th>计划</th><th>实际</th><th>完成率</th></tr></thead>
           <tbody>
             ${editableRows.map((row) => {
-              const item = normalizeImportRow(row);
+              const item = importRowNormalized(row);
               const id = row.__importRowId;
               return `<tr data-preview-row="${escapeAttr(id)}">
                 <td><input type="checkbox" data-preview-include="${escapeAttr(id)}" ${pendingImport.excludedRowIds?.has(id) ? "" : "checked"}></td>

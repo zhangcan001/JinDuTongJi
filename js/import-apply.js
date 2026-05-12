@@ -34,26 +34,35 @@
 }
 
 function stageImportedRowsForReview(rows, fileName, options = importOptions()) {
-  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [] };
+  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [], createdIds: [], createdTasks: [], updatedBefore: [], updatedAfter: [], scopeBeforeByProject: {}, scopeAfterByProject: {} };
   state.pendingImports = state.pendingImports || [];
   rows.forEach((row) => {
-    const normalized = normalizeImportRow(row);
+    const normalized = importRowNormalized(row);
     if (!normalized.name && !normalized.system) return;
+    if (normalizedImportHasRemovedContent(normalized)) {
+      result.skipped += 1;
+      return;
+    }
     if (!rowAllowedByImportScope(normalized, options)) {
       result.skipped += 1;
       return;
     }
     const project = projectForImportedRow(normalized, options);
     const scope = ensureProjectScope(project.id);
+    captureScopeBefore(result, project.id);
     result.scopeAdded += ensureApprovedScopeItems(scope, normalized);
     const importedTask = normalizedRowToTask(normalized, project.id);
-    state.pendingImports.push({
+    const pendingItem = {
       id: createId(),
       projectId: project.id,
       fileName,
       createdAt: new Date().toISOString(),
       task: importedTask
-    });
+    };
+    state.pendingImports.push(pendingItem);
+    result.createdIds.push(importedTask.id);
+    result.createdTasks.push(cloneData(importedTask));
+    captureScopeAfter(result, project.id);
     result.created += 1;
     result.details.push(importResultDetail("待复核", importedTask));
     result.changed.push({
@@ -69,7 +78,7 @@ function stageImportedRowsForReview(rows, fileName, options = importOptions()) {
 
 function normalizedRowToTask(normalized, projectId) {
   const planned = normalized.planned || "";
-  return {
+  return deriveTaskFields({
     id: createId(),
     projectId,
     name: normalized.name || `${normalized.building} ${normalized.system}`,
@@ -84,7 +93,7 @@ function normalizedRowToTask(normalized, projectId) {
     note: normalized.note,
     reviewStatus: "approved",
     plannedProgress: clampProgress(normalized.plannedProgress || (planned ? expectedProgress({ planned }) : 0))
-  };
+  });
 }
 
 function clearPendingImport() {
@@ -103,6 +112,8 @@ function applyImportMappingFromPreview() {
   pendingImport.mapping = mapping;
   state.uiPreferences = state.uiPreferences || {};
   state.uiPreferences.importFieldMap = mapping;
+  clearImportRowNormalizeCache(pendingImport.rows);
+  pendingImport.headerMap = buildImportHeaderMap(pendingImport.rows);
   refreshPendingImportPreview();
   showToast("字段映射已应用");
 }
@@ -125,7 +136,12 @@ function updatePendingImportFromPreview(options = {}) {
   });
   pendingImport.rows.forEach((row) => {
     if (!edits.has(row.__importRowId)) return;
-    row.__importOverride = { ...normalizeImportRow({ ...row, __importOverride: null }), ...edits.get(row.__importRowId) };
+    const baseRow = { ...row, __importOverride: null };
+    delete baseRow.__normalizedImportRow;
+    delete baseRow.__normalizedImportCacheKey;
+    row.__importOverride = { ...normalizeImportRow(baseRow), ...edits.get(row.__importRowId) };
+    delete row.__normalizedImportRow;
+    delete row.__normalizedImportCacheKey;
   });
   if (options.refresh !== false) refreshPendingImportPreview(false);
 }
@@ -159,12 +175,16 @@ function filteredImportRows(rows) {
 }
 
 function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
-  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [] };
+  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [], createdIds: [], createdTasks: [], updatedBefore: [], updatedAfter: [], scopeBeforeByProject: {}, scopeAfterByProject: {} };
   const importedKeys = new Set();
   const existingIndex = buildTaskImportIndex();
   resolveDuplicateImportRows(rows, options.duplicatePolicy || "last", options).forEach((row) => {
-    const normalized = normalizeImportRow(row);
+    const normalized = importRowNormalized(row);
     if (!normalized.name && !normalized.system) return;
+    if (normalizedImportHasRemovedContent(normalized)) {
+      result.skipped += 1;
+      return;
+    }
     if (!rowAllowedByImportScope(normalized, options)) {
       result.skipped += 1;
       return;
@@ -172,6 +192,7 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
 
     const project = projectForImportedRow(normalized, options);
     const scope = ensureProjectScope(project.id);
+    captureScopeBefore(result, project.id);
     result.scopeAdded += ensureApprovedScopeItems(scope, normalized);
 
     const importedTask = normalizedRowToTask(normalized, project.id);
@@ -188,7 +209,10 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
         result.skipped += 1;
         result.details.push(importResultDetail("跳过", importedTask));
       } else {
+        result.updatedBefore.push(cloneData(existing));
         Object.assign(existing, mergeImportedTask(existing, importedTask, options.updatePolicy), { id: existing.id });
+        deriveTaskFields(existing);
+        result.updatedAfter.push(cloneData(existing));
         result.updated += 1;
         result.details.push(importResultDetail("更新", importedTask));
       }
@@ -199,6 +223,8 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
       } else {
         state.tasks.push(importedTask);
         existingIndex.set(importKey, importedTask);
+        result.createdIds.push(importedTask.id);
+        result.createdTasks.push(cloneData(importedTask));
         result.created += 1;
         result.details.push(importResultDetail("新增", importedTask));
       }
@@ -210,8 +236,30 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
         ? "地下室"
         : `${parseFloorNumber(normalized.floor) || 1}层`
     });
+    captureScopeAfter(result, project.id);
   });
+  syncImportedScopeBuildings(result);
   return result;
+}
+
+function syncImportedScopeBuildings(result) {
+  const projectIds = new Set([
+    ...result.changed.map((item) => item.projectId),
+    ...Object.keys(result.scopeBeforeByProject || {})
+  ]);
+  projectIds.forEach((projectId) => {
+    captureScopeBefore(result, projectId);
+    if (syncProjectScopeBuildingsFromTasks(projectId)) captureScopeAfter(result, projectId);
+  });
+}
+
+function captureScopeBefore(result, projectId) {
+  if (result.scopeBeforeByProject[projectId]) return;
+  result.scopeBeforeByProject[projectId] = cloneData(state.projectScopes?.[projectId] || { basement: "", buildings: [], units: [] });
+}
+
+function captureScopeAfter(result, projectId) {
+  result.scopeAfterByProject[projectId] = cloneData(state.projectScopes?.[projectId] || { basement: "", buildings: [], units: [] });
 }
 
 function importResultDetail(type, task) {
@@ -249,6 +297,11 @@ function approvePendingImports() {
       state.tasks.push(importedTask);
       created += 1;
     }
+  });
+  syncImportedScopeBuildings({
+    changed: pending.map((item) => ({ projectId: item.projectId })),
+    scopeBeforeByProject: {},
+    scopeAfterByProject: {}
   });
   state.pendingImports = (state.pendingImports || []).filter((item) => item.projectId !== state.selectedProjectId);
   recordAudit("确认待复核导入", `新增 ${created}，更新 ${updated}`);

@@ -2191,14 +2191,12 @@ label {
   gap: 12px;
 }
 
-.elevator-grid,
 .dictionary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
 
-.elevator-card,
 .dictionary-card {
   border: 1px solid rgba(139, 235, 255, 0.15);
   border-radius: 8px;
@@ -2206,51 +2204,12 @@ label {
   padding: 12px;
 }
 
-.elevator-card strong,
 .dictionary-card h3 {
   display: flex;
   justify-content: space-between;
   margin: 0 0 10px;
   color: #effbff;
   font-size: 14px;
-}
-
-.elevator-card span {
-  display: block;
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgba(139, 235, 255, 0.12);
-}
-
-.elevator-card i {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--green));
-}
-
-.elevator-card small {
-  display: block;
-  margin-top: 8px;
-  color: var(--muted);
-}
-
-.elevator-floor-list {
-  display: grid;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.elevator-floor-list em {
-  display: block;
-  border: 1px solid rgba(139, 235, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(6, 18, 30, 0.52);
-  padding: 6px 8px;
-  color: #cfeaf2;
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 800;
 }
 
 .dictionary-card div {
@@ -3349,51 +3308,6 @@ body.office-mode .today-item button {
 .detail-dialog-body {
   padding: 18px;
   overflow: auto;
-}
-
-.auth-dialog {
-  width: min(560px, 100%);
-}
-
-.auth-form {
-  display: grid;
-  gap: 14px;
-}
-
-.auth-form label {
-  display: grid;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.auth-form input {
-  width: 100%;
-}
-
-.auth-hint {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.auth-status {
-  display: grid;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  min-width: 120px;
-}
-
-.auth-status strong {
-  font-size: 13px;
-}
-
-.auth-status small {
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .system-grid {

@@ -36,6 +36,21 @@ function parseBuilding(value) {
   return { name: name || text, floors: floorMatch ? Number(floorMatch[1]) : 1 };
 }
 
+function buildingFromImportedLocation(imported) {
+  const building = parseBuilding(imported.building || "");
+  const importedFloor = parseFloorNumber(imported.floor);
+  return {
+    ...building,
+    floors: Math.max(1, building.floors || 1, importedFloor || 0)
+  };
+}
+
+function findScopeBuilding(scope, importedBuildingName) {
+  const name = String(importedBuildingName || "").trim();
+  if (!name) return null;
+  return scope.buildings.find((building) => name === building.name || name.includes(building.name) || building.name.includes(name)) || null;
+}
+
 function normalizedBuildingKey(task) {
   const text = String(task.building || "");
   if (text.includes("地下")) return "地下室";
@@ -55,7 +70,6 @@ function normalizedFloorKey(value) {
 
 function normalizedOwnerKey(value) {
   const text = String(value || "").replace("单位", "").trim();
-  if (text.includes("电梯")) return "电梯";
   if (text.includes("机电")) return "机电";
   if (text.includes("消防")) return "消防";
   if (text.includes("智能")) return "智能化";
@@ -97,6 +111,31 @@ function taskKey(task) {
     .join("|");
 }
 
+function deriveTaskFields(task) {
+  if (!task) return task;
+  task._statusClass = typeof getTaskStatus === "function" ? getTaskStatus(task).className : "";
+  const buildingText = String(task.building || task.name || "");
+  task._buildingKey = globalThis.state ? resolveBuildingName(buildingText) : buildingText.replace(/（.*?）|\(.*?\)/g, "");
+  task._ownerKey = task.owner || task.discipline || "未填单位";
+  task._searchText = [
+    task.name,
+    task.note,
+    task.building,
+    task.floor,
+    task.system,
+    task.discipline,
+    task.owner,
+    task.planned,
+    task.actual
+  ].join(" ").toLowerCase();
+  return task;
+}
+
+function deriveTaskFieldsForList(tasks) {
+  (tasks || []).forEach(deriveTaskFields);
+  return tasks || [];
+}
+
 function currentProjectName() {
   return state.projects.find((project) => project.id === state.selectedProjectId)?.name || "未命名项目";
 }
@@ -117,6 +156,34 @@ function ensureProjectScope(projectId) {
   return state.projectScopes[projectId];
 }
 
+function taskIsImportedScopeSource(task) {
+  return task && task.source !== "floor-demo-v3" && String(task.building || "").trim() && String(task.floor || "").trim();
+}
+
+function syncProjectScopeBuildingsFromTasks(projectId) {
+  const scope = ensureProjectScope(projectId);
+  const buildingMap = new Map();
+  let basement = scope.basement || "";
+  state.tasks
+    .filter((task) => task.projectId === projectId && taskIsImportedScopeSource(task))
+    .forEach((task) => {
+      if (String(task.building || "").includes("地下") || String(task.floor || "").includes("地下")) {
+        basement = task.building || basement || "地下室";
+        return;
+      }
+      const importedBuilding = buildingFromImportedLocation(task);
+      const current = buildingMap.get(importedBuilding.name);
+      buildingMap.set(importedBuilding.name, {
+        name: importedBuilding.name,
+        floors: Math.max(Number(current?.floors || 1), importedBuilding.floors)
+      });
+    });
+  if (!buildingMap.size && !basement) return false;
+  scope.buildings = Array.from(buildingMap.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-Hans-CN", { numeric: true }));
+  scope.basement = basement;
+  return true;
+}
+
 function ensureScopeItems(scope, imported) {
   let added = 0;
   if (imported.building) {
@@ -125,9 +192,19 @@ function ensureScopeItems(scope, imported) {
         scope.basement = imported.building;
         added += 1;
       }
-    } else if (!scope.buildings.some((building) => imported.building.includes(building.name))) {
-      scope.buildings.push(parseBuilding(imported.building));
-      added += 1;
+    } else {
+      const importedBuilding = buildingFromImportedLocation(imported);
+      const existingBuilding = findScopeBuilding(scope, importedBuilding.name);
+      if (existingBuilding) {
+        const nextFloors = Math.max(Number(existingBuilding.floors || 1), importedBuilding.floors);
+        if (nextFloors !== Number(existingBuilding.floors || 1)) {
+          existingBuilding.floors = nextFloors;
+          added += 1;
+        }
+      } else {
+        scope.buildings.push(importedBuilding);
+        added += 1;
+      }
     }
   }
 
@@ -135,7 +212,7 @@ function ensureScopeItems(scope, imported) {
   const unitName = discipline.includes("单位") ? discipline : `${discipline || "其他"}单位`;
   let unit = scope.units.find((item) => item.name === unitName || item.name.includes(discipline));
   if (!unit) {
-    unit = { name: unitName, code: unitCode(unitName), systems: [] };
+    unit = { name: unitName, code: unitCode(unitName), statType: "task", systems: [] };
     scope.units.push(unit);
     added += 1;
   }
@@ -164,7 +241,6 @@ function inferDiscipline(owner, system) {
   const text = `${owner || ""}${system || ""}`;
   if (text.includes("消防") || text.includes("喷淋") || text.includes("消火栓") || text.includes("防排烟")) return "消防";
   if (text.includes("智能") || text.includes("线缆")) return "智能化";
-  if (text.includes("电梯")) return "电梯";
   if (text.includes("机电") || text.includes("空调") || text.includes("给水") || text.includes("排水") || text.includes("热水")) return "机电";
   return "其他";
 }
@@ -173,20 +249,7 @@ function unitCode(name) {
   if (name.includes("机电")) return "MEP";
   if (name.includes("消防")) return "FIRE";
   if (name.includes("智能")) return "IBMS";
-  if (name.includes("电梯")) return "LIFT";
   return "UNIT";
-}
-
-function removeCoveredElevatorFloorTasks(importedTask) {
-  if (!String(importedTask.owner || importedTask.discipline || "").includes("电梯")) return;
-  if (normalizedFloorKey(importedTask.floor) !== "整栋") return;
-  const buildingKey = normalizedBuildingKey(importedTask);
-  state.tasks = state.tasks.filter((task) => {
-    if (task.projectId !== importedTask.projectId) return true;
-    if (normalizedOwnerKey(task.owner || task.discipline || "") !== "电梯") return true;
-    if (normalizedBuildingKey(task) !== buildingKey) return true;
-    return normalizedFloorKey(task.floor) === "整栋";
-  });
 }
 
 function findExistingTaskForImport(importedTask) {

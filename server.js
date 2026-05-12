@@ -1,10 +1,10 @@
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
-const crypto = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
 const { pagedTableQuery } = require("./server/query");
 const { createRouteDispatcher } = require("./server/routes");
+const { validateState } = require("./server/validation");
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.PORT || 4173);
@@ -14,7 +14,6 @@ const DB_PATH = path.join(DATA_DIR, "jindu.sqlite");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const LOG_DIR = path.join(DATA_DIR, "logs");
 const LOG_PATH = path.join(LOG_DIR, "server.log");
-const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 const BACKUP_KEEP_COUNT = 30;
 const VERSION_KEEP_COUNT = 80;
 const BACKEND_AUDIT_KEEP_COUNT = 2000;
@@ -33,7 +32,6 @@ fs.mkdirSync(BACKUP_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 createStartupBackup();
-const appConfig = loadConfig();
 
 const db = new DatabaseSync(DB_PATH);
 db.exec(`
@@ -129,8 +127,8 @@ ensureAppStateVersionColumn();
 recordMigration(1, "initial backend schema");
 recordMigration(2, "state indexes and optimistic versioning");
 recordMigration(3, "backup restore export health and logs");
-recordMigration(4, "auth maintenance versions wal retry support");
-recordMigration(5, "cookie session auth and login gate");
+recordMigration(4, "maintenance versions wal retry support");
+recordMigration(5, "local api access");
 
 const upsertState = db.prepare(`
   INSERT INTO app_state (id, payload, updated_at, version)
@@ -149,17 +147,52 @@ const clearScopes = db.prepare("DELETE FROM project_scopes");
 const clearTasks = db.prepare("DELETE FROM tasks");
 const clearIssues = db.prepare("DELETE FROM issues");
 const clearAuditLogs = db.prepare("DELETE FROM audit_logs");
-const insertProject = db.prepare("INSERT INTO projects (id, name, archived, updated_at) VALUES (?, ?, ?, ?)");
-const insertScope = db.prepare("INSERT INTO project_scopes (project_id, payload, updated_at) VALUES (?, ?, ?)");
+const insertProject = db.prepare(`
+  INSERT INTO projects (id, name, archived, updated_at) VALUES (?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET name = excluded.name, archived = excluded.archived, updated_at = excluded.updated_at
+`);
+const insertScope = db.prepare(`
+  INSERT INTO project_scopes (project_id, payload, updated_at) VALUES (?, ?, ?)
+  ON CONFLICT(project_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
+`);
 const insertTask = db.prepare(`
   INSERT INTO tasks (id, project_id, name, owner, discipline, building, floor, system, progress, planned, actual, review_status, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    project_id = excluded.project_id,
+    name = excluded.name,
+    owner = excluded.owner,
+    discipline = excluded.discipline,
+    building = excluded.building,
+    floor = excluded.floor,
+    system = excluded.system,
+    progress = excluded.progress,
+    planned = excluded.planned,
+    actual = excluded.actual,
+    review_status = excluded.review_status,
+    updated_at = excluded.updated_at
 `);
 const insertIssue = db.prepare(`
   INSERT INTO issues (id, project_id, title, owner, status, severity, deadline, updated_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    project_id = excluded.project_id,
+    title = excluded.title,
+    owner = excluded.owner,
+    status = excluded.status,
+    severity = excluded.severity,
+    deadline = excluded.deadline,
+    updated_at = excluded.updated_at
 `);
-const insertAuditLog = db.prepare("INSERT INTO audit_logs (id, project_id, action, role, detail, time) VALUES (?, ?, ?, ?, ?, ?)");
+const insertAuditLog = db.prepare(`
+  INSERT INTO audit_logs (id, project_id, action, role, detail, time) VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    project_id = excluded.project_id,
+    action = excluded.action,
+    role = excluded.role,
+    detail = excluded.detail,
+    time = excluded.time
+`);
 const insertBackendAuditLog = db.prepare("INSERT INTO backend_audit_logs (action, detail, actor, created_at) VALUES (?, ?, ?, ?)");
 const routeDispatcher = createRouteDispatcher();
 
@@ -221,26 +254,6 @@ async function handleApi(request, response) {
   const parsedUrl = new URL(request.url, `http://${HOST}:${PORT}`);
   const route = parsedUrl.pathname;
 
-  if (route === "/api/auth/status" && request.method === "GET") {
-    return sendJson(response, 200, { enabled: authEnabled(), authenticated: isAuthenticated(request) });
-  }
-
-  if (route === "/api/auth/login" && request.method === "POST") {
-    const payload = await readJsonBody(request);
-    if (!authEnabled() || payload.password === appConfig.password) {
-      setAuthCookie(response, appConfig.token);
-      return sendJson(response, 200, { ok: true, authenticated: true });
-    }
-    logBackendAudit("auth.failed", "password rejected");
-    return sendJson(response, 401, { error: "密码不正确" });
-  }
-
-  if (route === "/api/auth/logout" && request.method === "POST") {
-    clearAuthCookie(response);
-    return sendJson(response, 200, { ok: true, authenticated: false });
-  }
-
-  if (!authorize(request, route, request.method)) return sendJson(response, 401, { error: "未授权" });
   if (!authorizeRole(request, route, request.method)) return sendJson(response, 403, { error: "当前角色无权执行该后端操作" });
 
   if (route === "/api/state" && request.method === "GET") {
@@ -280,7 +293,6 @@ async function handleApi(request, response) {
       backups: listBackups().length,
       checks: health.checks,
       problems: health.problems,
-      authEnabled: authEnabled(),
       wal: getPragmaValue("journal_mode"),
       structuredTables: ["projects", "project_scopes", "tasks", "issues", "audit_logs"]
     });
@@ -443,57 +455,6 @@ async function handleApi(request, response) {
   return sendJson(response, 404, { error: "接口不存在" });
 }
 
-function validateState(state) {
-  if (!state || typeof state !== "object") return { ok: false, error: "状态数据不能为空" };
-  if (!Array.isArray(state.projects)) return { ok: false, error: "状态数据缺少 projects 数组" };
-  if (!Array.isArray(state.tasks)) return { ok: false, error: "状态数据缺少 tasks 数组" };
-  if (state.issues && !Array.isArray(state.issues)) return { ok: false, error: "issues 必须是数组" };
-  if (state.projectScopes && (typeof state.projectScopes !== "object" || Array.isArray(state.projectScopes))) {
-    return { ok: false, error: "projectScopes 格式不正确" };
-  }
-  const projectIds = new Set();
-  for (const project of state.projects) {
-    if (!project?.id || !project?.name) return { ok: false, error: "项目必须包含 id 和 name" };
-    projectIds.add(String(project.id));
-  }
-  for (const task of state.tasks) {
-    if (!task?.id || !task?.projectId) return { ok: false, error: "节点必须包含 id 和 projectId" };
-    if (projectIds.size && !projectIds.has(String(task.projectId))) return { ok: false, error: `节点 ${task.id} 关联的项目不存在` };
-    const taskValidation = validateTaskRecord(task);
-    if (!taskValidation.ok) return taskValidation;
-  }
-  for (const issue of state.issues || []) {
-    const issueValidation = validateIssueRecord(issue, projectIds);
-    if (!issueValidation.ok) return issueValidation;
-  }
-  return { ok: true };
-}
-
-function validateTaskRecord(task) {
-  const progress = Number(task.progress ?? 0);
-  if (!Number.isFinite(progress) || progress < 0 || progress > 100) return { ok: false, error: `节点 ${task.id} 完成率必须在 0-100 之间` };
-  for (const field of ["planned", "actual"]) {
-    if (task[field] && !isDateText(task[field])) return { ok: false, error: `节点 ${task.id} 的${field}日期格式不正确` };
-  }
-  if (task.actual && task.planned && progress < 100) return { ok: false, error: `节点 ${task.id} 已填实际日期但完成率未达 100%` };
-  return { ok: true };
-}
-
-function validateIssueRecord(issue, projectIds) {
-  if (!issue?.id || !issue?.projectId) return { ok: false, error: "整改项必须包含 id 和 projectId" };
-  if (projectIds.size && !projectIds.has(String(issue.projectId))) return { ok: false, error: `整改项 ${issue.id} 关联的项目不存在` };
-  if (issue.deadline && !isDateText(issue.deadline)) return { ok: false, error: `整改项 ${issue.id} 的要求日期格式不正确` };
-  if (issue.closedAt && !isDateText(issue.closedAt)) return { ok: false, error: `整改项 ${issue.id} 的闭合日期格式不正确` };
-  if (issue.rectifyCount != null && (!Number.isFinite(Number(issue.rectifyCount)) || Number(issue.rectifyCount) < 0)) {
-    return { ok: false, error: `整改项 ${issue.id} 的整改次数不正确` };
-  }
-  return { ok: true };
-}
-
-function isDateText(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
-}
-
 function saveStateToDatabase(state, updatedAt) {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -517,20 +478,24 @@ function summarizeState(state) {
 }
 
 function rebuildIndexes(state, updatedAt) {
-  clearProjects.run();
-  clearScopes.run();
-  clearTasks.run();
-  clearIssues.run();
-  clearAuditLogs.run();
-
   const archived = new Set(state.archivedProjectIds || []);
+  const projectIds = new Set();
   for (const project of state.projects || []) {
+    projectIds.add(String(project.id));
     insertProject.run(String(project.id), String(project.name), archived.has(project.id) ? 1 : 0, updatedAt);
   }
+  pruneMissingRows("projects", "id", projectIds);
+
+  const scopeIds = new Set();
   for (const [projectId, scope] of Object.entries(state.projectScopes || {})) {
+    scopeIds.add(String(projectId));
     insertScope.run(projectId, JSON.stringify(scope || {}), updatedAt);
   }
+  pruneMissingRows("project_scopes", "project_id", scopeIds);
+
+  const taskIds = new Set();
   for (const task of state.tasks || []) {
+    taskIds.add(String(task.id));
     insertTask.run(
       String(task.id),
       String(task.projectId),
@@ -547,7 +512,11 @@ function rebuildIndexes(state, updatedAt) {
       updatedAt
     );
   }
+  pruneMissingRows("tasks", "id", taskIds);
+
+  const issueIds = new Set();
   for (const issue of state.issues || []) {
+    issueIds.add(String(issue.id));
     insertIssue.run(
       String(issue.id),
       String(issue.projectId || ""),
@@ -559,9 +528,14 @@ function rebuildIndexes(state, updatedAt) {
       updatedAt
     );
   }
+  pruneMissingRows("issues", "id", issueIds);
+
+  const auditIds = new Set();
   for (const log of state.auditLogs || []) {
+    const id = String(log.id || `${log.time}-${log.action}`);
+    auditIds.add(id);
     insertAuditLog.run(
-      String(log.id || `${log.time}-${log.action}`),
+      id,
       log.projectId || "",
       String(log.action || "操作"),
       log.role || "",
@@ -569,6 +543,18 @@ function rebuildIndexes(state, updatedAt) {
       log.time || updatedAt
     );
   }
+  pruneMissingRows("audit_logs", "id", auditIds);
+}
+
+function pruneMissingRows(table, column, keepIds) {
+  if (!keepIds.size) {
+    db.prepare(`DELETE FROM ${table}`).run();
+    return;
+  }
+  const existing = db.prepare(`SELECT ${column} AS id FROM ${table}`).all().map((row) => String(row.id));
+  const remove = existing.filter((id) => !keepIds.has(id));
+  const statement = db.prepare(`DELETE FROM ${table} WHERE ${column} = ?`);
+  for (const id of remove) statement.run(id);
 }
 
 function ensureAppStateVersionColumn() {
@@ -714,73 +700,15 @@ function pruneBackendAuditLogs() {
   `).run(BACKEND_AUDIT_KEEP_COUNT);
 }
 
-function loadConfig() {
-  const token = process.env.JINDU_TOKEN || randomToken();
-  const password = process.env.JINDU_PASSWORD || "";
-  const config = fs.existsSync(CONFIG_PATH) ? JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8")) : {};
-  const next = {
-    password: password || config.password || "",
-    token: process.env.JINDU_TOKEN || config.token || token
-  };
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify({ token: next.token, password: next.password }, null, 2));
-  return next;
-}
-
-function authEnabled() {
-  return Boolean(appConfig.password);
-}
-
-function authorize(request, route, method) {
-  if (!authEnabled()) return true;
-  if (method === "GET" && ["/api/health", "/api/auth/status"].includes(route)) return true;
-  return isAuthenticated(request);
-}
-
 function authorizeRole(request, route, method) {
   if (!WRITE_METHODS.has(method)) return true;
-  if (route === "/api/auth/login" || route === "/api/auth/logout" || route === "/api/audit") return true;
+  if (route === "/api/audit") return true;
   const role = actorFromRequest(request);
   return WRITE_ROLES.has(role);
 }
 
-function isAuthenticated(request) {
-  if (!authEnabled()) return true;
-  const token = request.headers["x-jindu-token"] || parseCookies(request.headers.cookie || "").jindu_session;
-  return token === appConfig.token;
-}
-
-function parseCookies(cookieHeader) {
-  return String(cookieHeader || "")
-    .split(";")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .reduce((cookies, item) => {
-      const index = item.indexOf("=");
-      if (index > 0) cookies[item.slice(0, index)] = decodeURIComponent(item.slice(index + 1));
-      return cookies;
-    }, {});
-}
-
-function setAuthCookie(response, token) {
-  const secure = isSecureCookieEnabled() ? "; Secure" : "";
-  response.setHeader("Set-Cookie", `jindu_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}`);
-}
-
-function clearAuthCookie(response) {
-  const secure = isSecureCookieEnabled() ? "; Secure" : "";
-  response.setHeader("Set-Cookie", `jindu_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`);
-}
-
-function isSecureCookieEnabled() {
-  return process.env.JINDU_SECURE_COOKIE === "1";
-}
-
 function actorFromRequest(request) {
   return request.headers["x-jindu-actor"] || "local";
-}
-
-function randomToken() {
-  return crypto.randomBytes(32).toString("base64url");
 }
 
 function getPragmaValue(name) {

@@ -1,4 +1,4 @@
-self.JINDU_SW_VERSION = "2dd98812f2c30f67";
+self.JINDU_SW_VERSION = "1fa73a91f60cf173";
 self.JINDU_SW_ASSETS = [
   "./",
   "./assets/progress-template.xlsx",

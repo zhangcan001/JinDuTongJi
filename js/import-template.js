@@ -4,57 +4,40 @@
   const usedNames = new Set();
   const sheets = [templateInstructionSheet()];
   scope.units.forEach((unit) => {
-    const elevator = isElevatorUnit(unit);
-    const headers = elevator
-      ? ["楼栋", "专业", "电梯数量", "已安装数量", "完成百分比"]
-      : ["楼栋", "楼层", "专业", "施工内容", "计划完成时间", "实际完成情况", "备注"];
-    const rows = elevator ? buildElevatorTemplateRows(unit, scope) : buildUnitTemplateRows(unit, scope);
+    const headers = ["楼栋", "楼层", "专业", "施工内容", "计划完成时间", "实际完成情况", "备注"];
+    const rows = buildUnitTemplateRows(unit, scope);
     sheets.push({
       name: uniqueSheetName(unit.name, usedNames),
       rows: [headers, ...rows],
-      widths: elevator ? [14, 14, 12, 12, 12] : [12, 10, 12, 24, 16, 18, 20]
+      widths: [12, 10, 12, 24, 16, 18, 20]
     });
   });
   exportTemplateWorkbook(sheets, fileName);
-}
-
-function isElevatorUnit(unit) {
-  return String(unit.name || "").includes("电梯") || String(unit.code || "").toUpperCase().includes("LIFT");
 }
 
 function templateInstructionSheet() {
   return {
     name: "填报说明",
     rows: [
-      ["模板版本", "v2026.05.11"],
-      ["项目", currentProjectName()],
-      ["生成时间", localDateText(today)],
-      ["填报规则", "每个施工单位只填写自己对应的工作表，表头不要删除或改名。"],
-      ["普通单位", "按楼栋、楼层、专业、施工内容、计划完成时间、实际完成情况、备注填写。"],
-      ["电梯单位", "按楼栋、专业、电梯数量、已安装数量、完成百分比填写，不填楼层。"],
-      ["完成情况", "实际完成情况可填未开始、已完成或0-100完成百分比。"],
-      ["单位口径", "同名施工内容按单位分别统计，例如机电导管内穿线与智能化导管内穿线分开计算。"]
+      ["填报说明", ""],
+      ["1. 每个施工单位只填写自己对应的工作表。", ""],
+      ["2. 表头不要删除或改名，导入时会按表头识别字段。", ""],
+      [`3. 施工部位建议使用项目范围中的楼栋名称，如 ${templateBuildingHint()}。`, ""],
+      ["4. 楼层填写如 3层、地下1层；完成率填写 0-100。", ""],
+      ["5. 完成率为 100% 时建议同步填写实际完成日期。", ""],
+      ["6. 地下室部位进度统一按完成百分比填写，不使用实际完成情况。", ""],
+      ["当前项目", currentProjectName()],
+      ["导出日期", localDateText(today)]
     ],
     widths: [16, 88]
   };
 }
 
-function buildElevatorTemplateRows(unit, scope) {
-  const buildings = scope.buildings.length
-    ? scope.buildings.map((building) => ({ label: building.name, floors: Number(building.floors || 1) }))
-    : [{ label: "楼栋名称", floors: 1 }];
-  const rows = [];
-  buildings.forEach((building) => {
-    const rowNumber = rows.length + 2;
-    rows.push([
-      building.label,
-      unit.name.replace("单位", "") || "电梯",
-      "",
-      "",
-      { formula: `IFERROR(D${rowNumber}/C${rowNumber}*100,0)` }
-    ]);
-  });
-  return rows;
+function templateBuildingHint() {
+  const scope = currentProjectScope();
+  const first = scope.buildings?.[0];
+  const basement = scope.basement || "地下室一层";
+  return first ? `${first.name}（${Number(first.floors || 1)}层）或${basement}` : basement;
 }
 
 function buildUnitTemplateRows(unit, scope) {
@@ -70,7 +53,7 @@ function buildUnitTemplateRows(unit, scope) {
           building.label,
           `${floorIndex}层`,
           unit.name.replace("单位", "") || unit.code || "专业",
-          `${unit.name}｜${system}`,
+          system,
           "",
           "未开始",
           ""
@@ -86,7 +69,7 @@ function buildUnitTemplateRows(unit, scope) {
         scope.basement,
         "地下1层",
         unit.name.replace("单位", "") || unit.code || "专业",
-        `${unit.name}｜${system}`,
+        system,
         "",
         "未开始",
         ""

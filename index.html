@@ -62,13 +62,6 @@
               <strong>本地数据库</strong>
               <small>等待同步</small>
             </div>
-            <div class="auth-status" id="authStatus" aria-live="polite">
-              <span></span>
-              <strong id="authStatusTitle">未登录</strong>
-              <small id="authStatusText">仅可查看</small>
-            </div>
-            <button class="ghost-btn" id="loginBtn" type="button">登录</button>
-            <button class="ghost-btn" id="logoutBtn" type="button" hidden>退出</button>
             <button class="ghost-btn" id="officeModeBtn" type="button">办公模式</button>
             <button class="ghost-btn" id="resetDemoBtn" type="button">恢复示例</button>
           </div>
@@ -112,7 +105,7 @@
                 <div class="readout">
                   <span>覆盖范围</span>
                   <strong id="screenScope">7 栋楼｜地下室 1 层</strong>
-                  <small id="screenScopeMeta">机电、消防、智能化、电梯施工内容已纳入</small>
+                  <small id="screenScopeMeta">机电、消防、智能化施工内容已纳入</small>
                 </div>
               </div>
             </div>
@@ -378,14 +371,6 @@
 
           <section class="unit-grid" id="scopeUnitGrid" aria-label="参建单位施工内容"></section>
 
-          <section class="panel elevator-panel">
-            <div class="panel-heading">
-              <h2>电梯专项看板</h2>
-              <span id="elevatorSummary">按楼栋统计</span>
-            </div>
-            <div class="elevator-grid" id="elevatorGrid"></div>
-          </section>
-
           <section class="panel dictionary-panel">
             <div class="panel-heading">
               <h2>数据字典</h2>
@@ -537,7 +522,6 @@
                   <option>机电</option>
                   <option>消防</option>
                   <option>智能化</option>
-                  <option>电梯</option>
                   <option>装饰</option>
                   <option>市政</option>
                   <option>安全文明</option>
@@ -769,6 +753,7 @@
                 <div class="system-card-body" id="systemHealthPanel"></div>
                 <div class="form-actions">
                   <button class="ghost-btn" id="refreshSystemBtn" type="button">刷新状态</button>
+                  <button class="ghost-btn" id="resolveBackendConflictBtn" type="button" hidden>载入数据库版本</button>
                   <button class="ghost-btn" id="runMaintenanceBtn" type="button">执行维护</button>
                 </div>
               </article>
@@ -802,27 +787,6 @@
           <button class="icon-btn" type="button" id="detailOverlayClose" aria-label="关闭详情">×</button>
         </div>
         <div class="detail-dialog-body" id="detailOverlayBody"></div>
-      </section>
-    </div>
-    <div class="detail-overlay" id="loginOverlay" hidden>
-      <section class="detail-dialog auth-dialog" role="dialog" aria-modal="true" aria-labelledby="loginDialogTitle">
-        <div class="detail-dialog-head">
-          <h2 id="loginDialogTitle">系统登录</h2>
-          <button class="icon-btn" type="button" id="loginOverlayClose" aria-label="关闭登录">×</button>
-        </div>
-        <div class="detail-dialog-body">
-          <form id="loginForm" class="auth-form">
-            <label>
-              管理员密码
-              <input type="password" name="password" autocomplete="current-password" placeholder="请输入本机管理员密码" />
-            </label>
-            <p class="auth-hint" id="authHint">登录后可写入数据库并同步操作审计。</p>
-            <div class="form-actions">
-              <button class="primary-btn" type="submit" id="loginSubmitBtn">登录</button>
-              <button class="ghost-btn" type="button" id="logoutFromDialogBtn">退出登录</button>
-            </div>
-          </form>
-        </div>
       </section>
     </div>
     <button class="carousel-exit-btn" id="carouselExitBtn" type="button">退出轮播</button>

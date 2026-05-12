@@ -3,7 +3,7 @@
     "start": "node --experimental-sqlite server.js",
     "build": "node scripts/build-manifest.js",
     "lint": "node tests/lint.test.js",
-    "test": "npm run lint && node tests/business-rules.test.js && node tests/core-flows.test.js && node tests/performance.test.js && node tests/service-worker.test.js && node tests/server-query.test.js && node tests/server-security.test.js && npm run test:ui",
+    "test": "npm run lint && node tests/business-rules.test.js && node tests/core-flows.test.js && node tests/performance.test.js && node tests/safe-render.test.js && node tests/service-worker.test.js && node tests/server-query.test.js && node tests/server-routes.test.js && node tests/server-validation.test.js && node tests/server-security.test.js && npm run test:ui",
     "test:ui": "node tests/ui-smoke.test.js"
   },
   "devDependencies": {

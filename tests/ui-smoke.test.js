@@ -124,6 +124,28 @@ async function launchBrowser() {
   await page.waitForFunction(() => document.querySelector("#taskTable")?.textContent.includes("室内给水系统"));
   await page.fill("#taskSearchInput", "");
 
+  const backendSaveProbe = await page.evaluate(() => {
+    const state = window.JinDu.getState();
+    const snapshot = window.cloneData(state);
+    snapshot.tasks = Array.from({ length: 900 }, (_, index) => ({
+      id: `bulk-${index}`,
+      projectId: "p1",
+      name: `批量保存节点 ${index}`,
+      owner: "UI测试单位",
+      building: "A1",
+      floor: "1层",
+      system: "保存压力测试",
+      planned: "2026-05-20",
+      actual: "",
+      progress: 50,
+      note: "用于验证大体积后端状态保存不会触发 keepalive 请求体限制。"
+    }));
+    const requestBody = JSON.stringify({ state: snapshot, baseVersion: 1 });
+    return { keepalive: window.shouldKeepBackendRequestAlive(requestBody), bodyLength: requestBody.length };
+  });
+  assert.ok(backendSaveProbe.bodyLength > 64 * 1024);
+  assert.equal(backendSaveProbe.keepalive, false);
+
   await page.click('[data-view="scope"]');
   await page.waitForSelector("#buildingGrid");
   assert.equal(await page.locator("#buildingGrid").isVisible(), true);

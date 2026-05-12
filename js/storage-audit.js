@@ -3,7 +3,7 @@ function scheduleStateMirrorToIndexedDB() {
   pendingIndexedDbSnapshot = {
     id: "latest",
     savedAt: new Date().toISOString(),
-    state: cloneData(state)
+    state: compactStateForStorage(state)
   };
   clearTimeout(pendingIndexedDbMirrorTimer);
   pendingIndexedDbMirrorTimer = setTimeout(flushStateMirrorToIndexedDB, 300);
@@ -90,16 +90,16 @@ function canUseBackendState() {
   return !backendApiUnavailable && (location.protocol === "http:" || location.protocol === "https:");
 }
 
+function shouldKeepBackendRequestAlive(body) {
+  return String(body || "").length <= BACKEND_KEEPALIVE_BODY_LIMIT;
+}
+
 function scheduleStateMirrorToBackend(options = {}) {
   if (!canUseBackendState()) return;
-  pendingBackendStateSnapshot = cloneData(state);
+  pendingBackendStateSnapshot = compactStateForStorage(state);
   persistPendingBackendState(pendingBackendStateSnapshot);
   clearTimeout(pendingBackendStateWriteTimer);
   clearTimeout(backendRetryTimer);
-  if (!backendCanWrite()) {
-    updateBackendSaveStatus("idle", "未登录");
-    return;
-  }
   updateBackendSaveStatus("saving", "保存中");
   if (options.immediate) {
     flushStateMirrorToBackend();
@@ -115,40 +115,24 @@ async function flushStateMirrorToBackend() {
   clearTimeout(pendingBackendStateWriteTimer);
   pendingBackendStateWriteTimer = null;
   if (!snapshot || !canUseBackendState()) return false;
-  if (!backendCanWrite()) {
-    updateBackendSaveStatus("idle", "未登录");
-    showAuthPrompt("请先登录后再同步到本机数据库。");
-    pendingBackendStateSnapshot = snapshot;
-    persistPendingBackendState(snapshot);
-    return false;
-  }
   backendSaveInFlight = true;
   try {
+    const requestBody = JSON.stringify({ state: snapshot, baseVersion: backendStateVersion });
     const response = await fetch("./api/state", {
       method: "PUT",
       headers: backendJsonHeaders(),
-      body: JSON.stringify({ state: snapshot, baseVersion: backendStateVersion }),
-      keepalive: true
+      body: requestBody,
+      keepalive: shouldKeepBackendRequestAlive(requestBody)
     });
     if (response.status === 409) {
       const payload = await response.json().catch(() => ({}));
-      backendStateVersion = Number(payload.currentVersion || backendStateVersion);
+      handleBackendStateConflict(snapshot, payload);
       updateBackendSaveStatus("error", "保存冲突");
-      notifyUser("数据库已有新版本，请刷新页面后再继续编辑。", "warn");
       return false;
     }
     if (response.status === 403) {
       updateBackendSaveStatus("error", "角色受限");
       notifyUser("当前角色无权写入后端数据库，修改已保存在浏览器本地。", "warn");
-      pendingBackendStateSnapshot = snapshot;
-      persistPendingBackendState(snapshot);
-      return false;
-    }
-    if (response.status === 401) {
-      backendAuthState = { enabled: true, authenticated: false, loading: false };
-      updateAuthUi();
-      updateBackendSaveStatus("error", "未登录");
-      showAuthPrompt("请先登录后再同步到本机数据库。");
       pendingBackendStateSnapshot = snapshot;
       persistPendingBackendState(snapshot);
       return false;
@@ -160,6 +144,7 @@ async function flushStateMirrorToBackend() {
     if (!response.ok) throw new Error("backend save failed");
     const payload = await response.json().catch(() => ({}));
     backendStateVersion = Number(payload.version || backendStateVersion);
+    backendConflict = null;
     backendRetryAttempt = 0;
     clearPendingBackendState();
     state.uiPreferences = state.uiPreferences || {};
@@ -177,6 +162,23 @@ async function flushStateMirrorToBackend() {
   } finally {
     backendSaveInFlight = false;
   }
+}
+
+function handleBackendStateConflict(snapshot, payload = {}) {
+  const currentVersion = Number(payload.currentVersion || backendStateVersion);
+  if (Number.isFinite(currentVersion)) backendStateVersion = currentVersion;
+  backendConflict = {
+    detectedAt: new Date().toISOString(),
+    localTasks: snapshot.tasks?.length || 0,
+    localIssues: snapshot.issues?.length || 0,
+    currentVersion,
+    updatedAt: payload.updatedAt || ""
+  };
+  pendingBackendStateSnapshot = snapshot;
+  persistPendingBackendState(snapshot);
+  const versionText = currentVersion ? `数据库 v${currentVersion}` : "数据库新版本";
+  const timeText = payload.updatedAt ? `，更新时间 ${payload.updatedAt.replace("T", " ").slice(0, 16)}` : "";
+  notifyUser(`${versionText}${timeText}。本地修改已保留在待同步队列，请刷新对比后再提交。`, "warn");
 }
 
 function persistPendingBackendState(snapshot) {
@@ -246,8 +248,6 @@ function resumePendingBackendWork() {
 
 function backendJsonHeaders() {
   const headers = { "Content-Type": "application/json" };
-  const token = localStorage.getItem("jindu-auth-token");
-  if (token) headers["X-Jindu-Token"] = token;
   headers["X-Jindu-Actor"] = currentRole();
   return headers;
 }
@@ -287,7 +287,6 @@ async function hydrateStateFromBackend() {
   pendingLocalStateSnapshot = JSON.stringify(state);
   flushLocalStateWrite();
   mirrorStateToIndexedDB();
-  await refreshAuthState();
   updateBackendSaveStatus("saved", "已连接");
   return true;
 }
@@ -296,11 +295,6 @@ async function migrateLocalStateToBackendIfNeeded() {
   if (!loadedStateFromLocalStorage || !canUseBackendState() || state.uiPreferences?.backendMigratedAt) return false;
   const validationReady = Array.isArray(state.projects) && Array.isArray(state.tasks);
   if (!validationReady) return false;
-  await refreshAuthState();
-  if (!backendCanWrite()) {
-    showAuthPrompt("请先登录后再把浏览器旧数据迁移到本机数据库。");
-    return false;
-  }
   state.uiPreferences = state.uiPreferences || {};
   state.uiPreferences.backendMigratedAt = new Date().toISOString();
   pendingBackendStateSnapshot = cloneData(state);
@@ -381,77 +375,6 @@ async function fetchBackendLogs() {
   }
 }
 
-async function refreshAuthState() {
-  if (!canUseBackendState()) {
-    backendAuthState = { enabled: false, authenticated: false, loading: false };
-    updateAuthUi();
-    return backendAuthState;
-  }
-  backendAuthState = { ...backendAuthState, loading: true };
-  updateAuthUi();
-  try {
-    const response = await fetch("./api/auth/status", { cache: "no-store" });
-    if (!response.ok) throw new Error("status failed");
-    backendAuthState = { ...(await response.json()), loading: false };
-  } catch {
-    backendAuthState = { enabled: false, authenticated: false, loading: false };
-  }
-  updateAuthUi();
-  return backendAuthState;
-}
-
-async function loginWithPassword(password) {
-  const response = await fetch("./api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password })
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "登录失败");
-  }
-  backendAuthState = { enabled: true, authenticated: true, loading: false };
-  updateAuthUi();
-  resumePendingBackendWork();
-  return true;
-}
-
-async function logoutBackendSession() {
-  if (!canUseBackendState()) return false;
-  await fetch("./api/auth/logout", { method: "POST" }).catch(() => {});
-  backendAuthState = { enabled: true, authenticated: false, loading: false };
-  updateAuthUi();
-  return true;
-}
-
-function backendCanWrite() {
-  if (backendAuthState.loading) return false;
-  return !backendAuthState.enabled || backendAuthState.authenticated;
-}
-
-function updateAuthUi() {
-  if (els.authStatusTitle) {
-    els.authStatusTitle.textContent = backendAuthState.loading ? "认证中" : backendAuthState.enabled ? (backendAuthState.authenticated ? "已登录" : "未登录") : "本地模式";
-  }
-  if (els.authStatusText) {
-    els.authStatusText.textContent = backendAuthState.loading ? "正在检查登录状态" : backendAuthState.enabled ? (backendAuthState.authenticated ? "可写入数据库" : "仅可查看") : "无需登录";
-  }
-  if (els.loginBtn) els.loginBtn.hidden = backendAuthState.loading ? false : backendAuthState.enabled && backendAuthState.authenticated;
-  if (els.logoutBtn) els.logoutBtn.hidden = !(backendAuthState.enabled && backendAuthState.authenticated);
-  if (els.authStatus) els.authStatus.dataset.tone = backendAuthState.loading ? "saving" : backendAuthState.enabled ? (backendAuthState.authenticated ? "saved" : "error") : "idle";
-}
-
-function showAuthPrompt(message = "") {
-  if (els.loginOverlay) els.loginOverlay.hidden = false;
-  if (els.authHint && message) els.authHint.textContent = message;
-}
-
-function hideAuthPrompt() {
-  if (els.loginOverlay) els.loginOverlay.hidden = true;
-  if (els.loginForm?.elements.password) els.loginForm.elements.password.value = "";
-  if (els.authHint) els.authHint.textContent = "登录后可写入数据库并同步操作审计。";
-}
-
 function renderSystemSettingsPanel() {
   if (!els.systemHealthPanel || !els.systemBackupPanel || !els.systemLogPanel || !els.systemRestorePanel) return;
   const checks = backendHealth?.checks || [];
@@ -506,13 +429,34 @@ function renderSystemSettingsPanel() {
     </div>
   `;
   renderPerformancePanel();
+  if (els.resolveBackendConflictBtn) els.resolveBackendConflictBtn.hidden = !backendConflict;
+}
+
+async function resolveBackendStateConflict() {
+  if (!backendConflict) return showToast("没有待处理的数据库冲突");
+  const snapshot = readPendingBackendState();
+  const summary = snapshot ? `本地待同步：${snapshot.tasks?.length || 0} 条节点、${snapshot.issues?.length || 0} 条整改。` : "本地待同步快照未找到。";
+  if (!(await confirmAction(`${summary}\n\n将载入数据库 v${backendConflict.currentVersion || "?"} 的最新状态，本地待同步快照会继续保留，可通过导出备份另存。`, {
+    title: "载入数据库版本",
+    okText: "载入"
+  }))) return;
+  const payload = await readStateFromBackend();
+  if (!payload?.state) return showToast("读取数据库状态失败", "warn");
+  state = migrateState(cloneData(payload.state));
+  backendStateVersion = Number(payload.version || backendStateVersion);
+  backendConflict = null;
+  pendingLocalStateSnapshot = JSON.stringify(compactStateForStorage(state));
+  flushLocalStateWrite();
+  mirrorStateToIndexedDB();
+  await refreshSystemState();
+  render();
+  showToast("已载入数据库最新版本");
 }
 
 async function createBackendBackup() {
   if (!canUseBackendState()) return showToast("后端服务未连接", "warn");
-  if (backendAuthState.enabled && !backendAuthState.authenticated) return showAuthPrompt("请先登录后再创建数据库备份。");
   try {
-    const response = await fetch("./api/backups", { method: "POST" });
+    const response = await fetch("./api/backups", { method: "POST", headers: backendJsonHeaders() });
     if (!response.ok) throw new Error("backup failed");
     await fetchBackendBackups();
     renderBackendBackupPanel();
@@ -524,9 +468,8 @@ async function createBackendBackup() {
 
 async function runBackendMaintenance() {
   if (!canUseBackendState()) return showToast("后端服务未连接", "warn");
-  if (backendAuthState.enabled && !backendAuthState.authenticated) return showAuthPrompt("请先登录后再执行系统维护。");
   try {
-    const response = await fetch("./api/maintenance", { method: "POST" });
+    const response = await fetch("./api/maintenance", { method: "POST", headers: backendJsonHeaders() });
     if (!response.ok) throw new Error("maintenance failed");
     await refreshBackendHealth();
     await fetchBackendBackups();
@@ -543,7 +486,7 @@ async function restoreBackendBackup(name) {
   if (!ensureCanEdit("恢复数据库备份")) return;
   if (!(await confirmAction(`确定恢复数据库备份“${name}”吗？当前数据库会先自动备份。`, { title: "恢复数据库备份", okText: "恢复" }))) return;
   try {
-    const response = await fetch(`./api/backups/${encodeURIComponent(name)}/restore`, { method: "POST" });
+    const response = await fetch(`./api/backups/${encodeURIComponent(name)}/restore`, { method: "POST", headers: backendJsonHeaders() });
     if (!response.ok) throw new Error("restore failed");
     const restored = await readStateFromBackend();
     if (!restored?.state) throw new Error("restored state missing");
@@ -571,7 +514,7 @@ async function importBackendJsonBackup(event) {
     if (!(await confirmAction(`${preview}\n\n导入会先自动备份当前数据库，然后替换数据库状态。确定继续吗？`, { title: "导入数据库 JSON", okText: "导入" }))) return;
     const response = await fetch("./api/import/json", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: backendJsonHeaders(),
       body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error("import failed");
@@ -592,7 +535,6 @@ async function importBackendJsonBackup(event) {
 
 async function refreshSystemState() {
   await Promise.all([
-    refreshAuthState(),
     refreshBackendHealth(),
     fetchBackendBackups(),
     fetchBackendVersions(),
@@ -948,6 +890,9 @@ function renderPerformancePanel() {
   if (!els.performancePanel || typeof perfMetrics === "undefined") return;
   const cacheBuckets = stateCache?.projectItems?.size || 0;
   const pendingBackend = readPendingBackendAuditQueue().length;
+  const conflictHtml = backendConflict
+    ? `<article class="warn"><strong>同步冲突</strong><small>本地 ${backendConflict.localTasks} 节点｜数据库 v${backendConflict.currentVersion || "?"}</small></article>`
+    : "";
   setSafeHtml(els.performancePanel, safeTemplateHtml`
     <div class="health-grid">
       <article class="ok"><strong>节点</strong><small>${currentProjectItems("tasks").length} 条</small></article>
@@ -957,6 +902,7 @@ function renderPerformancePanel() {
       <article class="ok"><strong>缓存</strong><small>${cacheBuckets} 组｜v${stateCache?.version || 0}</small></article>
       <article class="${pendingBackend ? "warn" : "ok"}"><strong>审计队列</strong><small>${pendingBackend} 条待同步</small></article>
       <article class="${backendPageStats ? "ok" : "warn"}"><strong>后端分页</strong><small>${backendPageStats ? `节点 ${backendPageStats.tasks}｜整改 ${backendPageStats.issues}` : "未连接"}</small></article>
+      ${conflictHtml}
     </div>
   `);
 }
