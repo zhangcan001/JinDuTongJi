@@ -15,9 +15,12 @@
   const system = cleanImportText(scopedSystem.system || rawSystem);
   const building = pickCell(row, ["施工部位", "部位", "楼栋", "楼号", "单体", "栋号"], "building");
   const floor = pickCell(row, ["楼层", "层数", "施工楼层", "部位层"], "floor");
+  const plannedStartRaw = pickCell(row, ["计划开始", "计划开始时间", "计划开始日期", "计划开工", "计划开工日期", "计划启动"], "plannedStart");
+  const plannedStart = normalizeDate(plannedStartRaw);
   const plannedRaw = pickCell(row, ["计划完成", "计划完成时间", "计划完成日期", "计划日期", "计划时间"], "planned");
   const planned = normalizeDate(plannedRaw);
   const note = pickCell(row, ["监理意见", "备注", "说明", "偏差原因"], "note");
+  const plannedStartNote = plannedStartRaw && !plannedStart ? `计划开始说明：${plannedStartRaw}` : "";
   const plannedNote = plannedRaw && !planned ? `计划说明：${plannedRaw}` : "";
   const normalized = {
     projectName: pickCell(row, ["项目", "项目名称", "工程名称", "标段"], "projectName"),
@@ -27,10 +30,11 @@
     owner: systemOwner,
     system,
     name: pickCell(row, ["节点名称", "节点", "任务名称", "进度节点"], "name"),
+    plannedStart,
     planned,
-    actual: normalizeDate(pickCell(row, ["实际完成", "实际完成日期", "实际日期", "完成日期"], "actual")),
+    actual: "",
     progress: statusProgress ?? pickCell(row, ["完成率", "进度", "实际进度", "完成百分比"], "progress"),
-    note: [note, plannedNote].filter(Boolean).join("；"),
+    note: [note, plannedStartNote, plannedNote].filter(Boolean).join("；"),
     plannedProgress: pickCell(row, ["计划完成率", "计划进度"], "plannedProgress"),
     completionStatus
   };
@@ -109,10 +113,10 @@ function countScopeDiff(before, after) {
 
 function mergeImportedTask(existing, imported, policy) {
   if (policy === "progressOnly") {
-    return { progress: imported.progress, actual: imported.actual, note: imported.note || existing.note, reviewStatus: imported.reviewStatus };
+    return { progress: imported.progress, note: imported.note || existing.note, reviewStatus: imported.reviewStatus };
   }
   if (policy === "planOnly") {
-    return { planned: imported.planned, plannedProgress: imported.plannedProgress };
+    return { plannedStart: imported.plannedStart, planned: imported.planned, plannedProgress: imported.plannedProgress };
   }
   if (policy === "skipBlank") {
     return Object.fromEntries(Object.entries(imported).filter(([, value]) => value !== "" && value != null));
@@ -127,8 +131,8 @@ function resolveDuplicateImportRows(rows, policy, options = importOptions()) {
     const normalized = importRowNormalized(row);
     const projectName = importProjectNameForRow(normalized, options);
     const project = state.projects.find((item) => item.name === projectName);
-    const importedTask = normalizedRowToTask(normalized, project?.id || `preview-${projectName}`);
-    const key = taskKey(importedTask);
+    const importedTask = normalizedRowToTask(normalized, project?.id || `preview-${projectName}`, row, "");
+    const key = excelSourceTaskKey(importedTask) || taskKey(importedTask);
     if (!byKey.has(key)) {
       byKey.set(key, row);
       return;
@@ -277,9 +281,8 @@ function importHeaderMatchScore(header, field) {
   if (!definition) return 0;
   const normalizedHeader = normalizeImportHeaderText(header);
   if (!normalizedHeader) return 0;
-  if (field === "actual" && /计划/.test(normalizedHeader) && !/实际/.test(normalizedHeader)) return 0;
   if (field === "planned" && /实际/.test(normalizedHeader) && !/计划/.test(normalizedHeader)) return 0;
-  if (field === "actual" && /(情况|状态)/.test(normalizedHeader) && !/(日期|时间|完工|完成日|结束)/.test(normalizedHeader)) return 0;
+  if (field === "planned" && /(计划开始|计划开工|计划启动)/.test(normalizedHeader)) return 0;
   if (field === "progress" && /(情况|状态)/.test(normalizedHeader) && !/(率|比例|百分比|进度)/.test(normalizedHeader)) return 0;
   const aliases = definition[2] || [];
   let score = 0;
@@ -303,8 +306,8 @@ function importHeaderKeywordScore(header, field) {
   if (field === "owner" && any("责任单位", "施工单位", "分包", "班组", "承包单位")) return 10;
   if (field === "system" && any("施工内容", "工作内容", "任务内容", "作业内容", "工序", "系统")) return 10;
   if (field === "name" && all("节点", "名称")) return 9;
+  if (field === "plannedStart" && any("计划开始", "计划开工", "计划启动") || field === "plannedStart" && all("计划", "开始")) return 10;
   if (field === "planned" && any("计划完成", "计划完工", "计划结束") || field === "planned" && all("计划", "日期")) return 10;
-  if (field === "actual" && any("实际完成", "实际完工", "完成日期", "完成时间") || field === "actual" && all("实际", "日期")) return 10;
   if (field === "progress" && any("完成率", "完成比例", "百分比", "进度")) return 10;
   if (field === "completionStatus" && any("完成情况", "施工状态", "进展状态", "当前状态")) return 10;
   if (field === "note" && any("备注", "说明", "意见", "原因", "问题")) return 8;

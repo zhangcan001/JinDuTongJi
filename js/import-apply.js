@@ -34,7 +34,7 @@
 }
 
 function stageImportedRowsForReview(rows, fileName, options = importOptions()) {
-  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [], createdIds: [], createdTasks: [], updatedBefore: [], updatedAfter: [], scopeBeforeByProject: {}, scopeAfterByProject: {} };
+  const result = importResultState();
   state.pendingImports = state.pendingImports || [];
   rows.forEach((row) => {
     const normalized = importRowNormalized(row);
@@ -51,17 +51,20 @@ function stageImportedRowsForReview(rows, fileName, options = importOptions()) {
     const scope = ensureProjectScope(project.id);
     captureScopeBefore(result, project.id);
     result.scopeAdded += ensureApprovedScopeItems(scope, normalized);
-    const importedTask = normalizedRowToTask(normalized, project.id);
+    const excelRecord = excelRecordFromImportRow(row, normalized, project.id, fileName);
+    const importedTask = excelRecord ? taskFromExcelRecord(excelRecord) : normalizedRowToTask(normalized, project.id);
     const pendingItem = {
       id: createId(),
       projectId: project.id,
       fileName,
       createdAt: new Date().toISOString(),
-      task: importedTask
+      task: importedTask,
+      excelRecord
     };
     state.pendingImports.push(pendingItem);
     result.createdIds.push(importedTask.id);
     result.createdTasks.push(cloneData(importedTask));
+    captureExcelRecordChange(excelRecord, result);
     captureScopeAfter(result, project.id);
     result.created += 1;
     result.details.push(importResultDetail("待复核", importedTask));
@@ -76,7 +79,12 @@ function stageImportedRowsForReview(rows, fileName, options = importOptions()) {
   return result;
 }
 
-function normalizedRowToTask(normalized, projectId) {
+function normalizedRowToTask(normalized, projectId, sourceRow = null, fileName = "") {
+  if (sourceRow) {
+    const source = importExcelSourceFromRow(sourceRow, fileName);
+    const record = source ? buildExcelRecordFromImportRow(source, normalized, projectId, fileName) : null;
+    if (record) return taskFromExcelRecord(record);
+  }
   const planned = normalized.planned || "";
   return deriveTaskFields({
     id: createId(),
@@ -87,13 +95,30 @@ function normalizedRowToTask(normalized, projectId) {
     building: normalized.building,
     floor: normalized.floor,
     system: normalized.system,
+    plannedStart: normalized.plannedStart || "",
     planned,
-    actual: normalized.actual,
+    actual: "",
     progress: clampProgress(normalized.progress),
     note: normalized.note,
     reviewStatus: "approved",
     plannedProgress: clampProgress(normalized.plannedProgress || (planned ? expectedProgress({ planned }) : 0))
   });
+}
+
+function importExcelSourceFromRow(row, fileName = "") {
+  const headers = Object.keys(row || {}).filter((key) => !String(key).startsWith("__"));
+  const values = {};
+  headers.forEach((header) => {
+    values[header] = cleanImportText(row[header]);
+  });
+  if (!headers.some((header) => values[header])) return null;
+  return {
+    fileName,
+    sheetName: cleanImportText(row.来源工作表 || ""),
+    rowNumber: Number(row.__importRowNumber || 0) || 0,
+    headers,
+    values
+  };
 }
 
 function clearPendingImport() {
@@ -175,7 +200,7 @@ function filteredImportRows(rows) {
 }
 
 function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
-  const result = { created: 0, updated: 0, skipped: 0, scopeAdded: 0, changed: [], details: [], createdIds: [], createdTasks: [], updatedBefore: [], updatedAfter: [], scopeBeforeByProject: {}, scopeAfterByProject: {} };
+  const result = importResultState();
   const importedKeys = new Set();
   const existingIndex = buildTaskImportIndex();
   resolveDuplicateImportRows(rows, options.duplicatePolicy || "last", options).forEach((row) => {
@@ -195,20 +220,24 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
     captureScopeBefore(result, project.id);
     result.scopeAdded += ensureApprovedScopeItems(scope, normalized);
 
-    const importedTask = normalizedRowToTask(normalized, project.id);
+    const activePendingImport = typeof pendingImport === "undefined" ? null : pendingImport;
+    const fileName = activePendingImport?.fileName || "";
+    const excelRecord = excelRecordFromImportRow(row, normalized, project.id, fileName);
+    const importedTask = excelRecord ? taskFromExcelRecord(excelRecord) : normalizedRowToTask(normalized, project.id);
 
-    const importKey = taskKey(importedTask);
+    const importKey = excelSourceTaskKey(importedTask) || taskKey(importedTask);
     if (importedKeys.has(importKey)) {
       result.skipped += 1;
       return;
     }
     importedKeys.add(importKey);
-    const existing = existingIndex.get(importKey);
+    const existing = existingIndex.get(importKey) || existingIndex.get(taskKey(importedTask));
     if (existing) {
       if (mode === "appendOnly") {
         result.skipped += 1;
         result.details.push(importResultDetail("跳过", importedTask));
       } else {
+        upsertExcelRecord(excelRecord, result);
         result.updatedBefore.push(cloneData(existing));
         Object.assign(existing, mergeImportedTask(existing, importedTask, options.updatePolicy), { id: existing.id });
         deriveTaskFields(existing);
@@ -221,6 +250,7 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
         result.skipped += 1;
         result.details.push(importResultDetail("跳过", importedTask));
       } else {
+        upsertExcelRecord(excelRecord, result);
         state.tasks.push(importedTask);
         existingIndex.set(importKey, importedTask);
         result.createdIds.push(importedTask.id);
@@ -240,6 +270,146 @@ function applyImportedRows(rows, mode = "upsert", options = importOptions()) {
   });
   syncImportedScopeBuildings(result);
   return result;
+}
+
+function importResultState() {
+  return {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    scopeAdded: 0,
+    changed: [],
+    details: [],
+    createdIds: [],
+    createdTasks: [],
+    updatedBefore: [],
+    updatedAfter: [],
+    createdExcelRecords: [],
+    updatedExcelRecordsBefore: [],
+    updatedExcelRecordsAfter: [],
+    scopeBeforeByProject: {},
+    scopeAfterByProject: {}
+  };
+}
+
+function upsertExcelRecordFromImportRow(row, normalized, projectId, fileName = "") {
+  return upsertExcelRecord(excelRecordFromImportRow(row, normalized, projectId, fileName));
+}
+
+function excelRecordFromImportRow(row, normalized, projectId, fileName = "") {
+  const source = importExcelSourceFromRow(row, fileName);
+  return source ? buildExcelRecordFromImportRow(source, normalized, projectId, fileName) : null;
+}
+
+function upsertExcelRecord(record, result = null) {
+  if (!record) return null;
+  state.excelRecords = state.excelRecords || [];
+  const index = state.excelRecords.findIndex((item) => item.recordKey === record.recordKey);
+  if (index >= 0) {
+    if (result) result.updatedExcelRecordsBefore.push(cloneData(state.excelRecords[index]));
+    state.excelRecords[index] = { ...state.excelRecords[index], ...record };
+    if (result) result.updatedExcelRecordsAfter.push(cloneData(state.excelRecords[index]));
+  } else {
+    state.excelRecords.push(record);
+    if (result) result.createdExcelRecords.push(cloneData(record));
+  }
+  return record;
+}
+
+function captureExcelRecordChange(record, result) {
+  if (!record || !result) return;
+  const existing = (state.excelRecords || []).find((item) => item.recordKey === record.recordKey);
+  if (existing) {
+    result.updatedExcelRecordsBefore.push(cloneData(existing));
+    result.updatedExcelRecordsAfter.push(cloneData(record));
+  } else {
+    result.createdExcelRecords.push(cloneData(record));
+  }
+}
+
+function buildExcelRecordFromImportRow(source, normalized, projectId, fileName = "") {
+  return {
+    id: excelRecordId(projectId, source),
+    projectId,
+    fileName: source.fileName || fileName || "",
+    sheetName: source.sheetName,
+    rowNumber: source.rowNumber,
+    importedAt: new Date().toISOString(),
+    rawHeaders: source.headers,
+    rawValues: source.values,
+    mappedFields: {
+      projectName: normalized.projectName || "",
+      building: normalized.building || "",
+      floor: normalized.floor || "",
+      discipline: normalized.discipline || "",
+      owner: normalized.owner || "",
+      system: normalized.system || "",
+      name: normalized.name || "",
+      plannedStart: normalized.plannedStart || "",
+      planned: normalized.planned || "",
+      progress: clampProgress(normalized.progress),
+      note: normalized.note || ""
+    },
+    recordKey: excelRecordKey(projectId, source),
+    rowHash: excelRecordHash(source.values)
+  };
+}
+
+function taskFromExcelRecord(record) {
+  const fields = record.mappedFields || {};
+  const planned = fields.planned || "";
+  const stableRecordKey = stableExcelRecordKey(record);
+  return deriveTaskFields({
+    id: createId(),
+    projectId: record.projectId,
+    name: fields.name || `${fields.building || ""} ${fields.system || ""}`.trim(),
+    discipline: fields.discipline || inferDiscipline(fields.owner, fields.system),
+    owner: fields.owner || fields.discipline || "未填责任单位",
+    building: fields.building || "",
+    floor: fields.floor || "",
+    system: fields.system || "",
+    plannedStart: fields.plannedStart || "",
+    planned,
+    actual: "",
+    progress: clampProgress(fields.progress),
+    note: fields.note || "",
+    reviewStatus: "approved",
+    plannedProgress: clampProgress(fields.plannedProgress || (planned ? expectedProgress({ planned }) : 0)),
+    ...(stableRecordKey ? { source: "excel-record", excelRecordKey: stableRecordKey } : {}),
+    excelSource: {
+      fileName: record.fileName || "",
+      sheetName: record.sheetName || "",
+      rowNumber: Number(record.rowNumber || 0) || 0,
+      headers: record.rawHeaders || Object.keys(record.rawValues || {}),
+      values: record.rawValues || {}
+    }
+  });
+}
+
+function stableExcelRecordKey(record) {
+  const rowNumber = Number(record?.rowNumber || 0);
+  const sheetName = String(record?.sheetName || "").trim();
+  if (!record?.projectId || !sheetName || !rowNumber) return "";
+  return [record.projectId, sheetName, rowNumber].join("|");
+}
+
+function excelRecordId(projectId, source) {
+  return `excel-${excelRecordKey(projectId, source).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function excelRecordKey(projectId, source) {
+  if (source.sheetName && source.rowNumber) return [projectId, source.sheetName, source.rowNumber].join("|");
+  return [projectId, source.sheetName || "sheet", excelRecordHash(source.values)].join("|");
+}
+
+function excelRecordHash(values) {
+  const text = JSON.stringify(values || {});
+  let hash = 0;
+  text.split("").forEach((char) => {
+    hash = ((hash << 5) - hash) + char.charCodeAt(0);
+    hash |= 0;
+  });
+  return String(Math.abs(hash));
 }
 
 function syncImportedScopeBuildings(result) {
@@ -271,6 +441,7 @@ function importResultDetail(type, task) {
     专业: task.discipline || "",
     责任单位: task.owner || "",
     施工内容: task.system || task.name || "",
+    计划开始: task.plannedStart || "",
     计划完成: task.planned || "",
     完成率: task.progress || 0
   };
@@ -288,6 +459,7 @@ function approvePendingImports() {
   let created = 0;
   let updated = 0;
   pending.forEach((item) => {
+    upsertExcelRecord(item.excelRecord);
     const importedTask = { ...item.task, reviewStatus: "approved" };
     const existing = findExistingTaskForImport(importedTask);
     if (existing) {

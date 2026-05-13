@@ -1,5 +1,5 @@
 function currentRole() {
-  return state.currentRole || "admin";
+  return state.currentRole || "supervisor";
 }
 
 const LEGACY_REMOVED_UNIT_NAME = String.fromCharCode(30005, 26799);
@@ -76,9 +76,9 @@ function roleLabel(role = currentRole()) {
     admin: "管理员",
     pm: "项目经理",
     contractor: "施工单位",
-    supervisor: "监理",
+    supervisor: "监理工程师",
     viewer: "只读查看"
-  }[role] || "管理员";
+  }[role] || "监理工程师";
 }
 
 function ensureCanEdit(action = "执行此操作") {
@@ -160,7 +160,7 @@ function taskMatchesSmartFilter(task, smart) {
   }
   if (smart === "missingPlan") return !task.planned;
   if (smart === "missingNote") return !String(task.note || "").trim();
-  if (smart === "conflict") return (task.actual && Number(task.progress || 0) < 100) || (Number(task.progress || 0) >= 100 && !task.actual);
+  if (smart === "conflict") return task.plannedStart && task.planned && new Date(task.plannedStart) > new Date(task.planned);
   return true;
 }
 
@@ -180,11 +180,12 @@ function migrateState(nextState) {
   nextState.planBaselines = nextState.planBaselines || [];
   nextState.restorePoints = nextState.restorePoints || [];
   nextState.auditLogs = nextState.auditLogs || [];
-  nextState.currentRole = nextState.currentRole || "admin";
+  nextState.currentRole = nextState.currentRole || "supervisor";
   nextState.selectedContractorUnit = nextState.selectedContractorUnit || "all";
   nextState.progressWeights = nextState.progressWeights || {};
   nextState.importVersions = nextState.importVersions || [];
   nextState.pendingImports = nextState.pendingImports || [];
+  nextState.excelRecords = nextState.excelRecords || [];
   nextState.archivedProjectIds = nextState.archivedProjectIds || [];
   nextState.projectTemplates = nextState.projectTemplates || [];
   nextState.entityHistory = nextState.entityHistory || [];
@@ -208,9 +209,10 @@ function migrateState(nextState) {
   applyKnownBuildingFloorCorrections(nextState);
   nextState.tasks = (nextState.tasks || []).filter((task) => !taskHasRemovedContent(task));
   nextState.tasks = (nextState.tasks || []).map((task) => deriveTaskFields({
-    plannedProgress: expectedProgress({ planned: task.planned, actual: task.actual }),
+    plannedProgress: expectedProgress({ plannedStart: task.plannedStart, planned: task.planned }),
     reviewStatus: "approved",
-    ...task
+    ...task,
+    ...(task.excelRecordKey ? {} : excelTaskLinkFields(task))
   }));
   nextState.issues = (nextState.issues || [])
     .filter((issue) => !issueHasRemovedContent(issue))
@@ -243,6 +245,17 @@ function migrateState(nextState) {
   });
   invalidateStateCache();
   return nextState;
+}
+
+function excelTaskLinkFields(task) {
+  const source = task?.excelSource;
+  const rowNumber = Number(source?.rowNumber || 0);
+  const sheetName = String(source?.sheetName || "").trim();
+  if (!task?.projectId || !sheetName || !rowNumber) return {};
+  return {
+    source: task.source || "excel-record",
+    excelRecordKey: [task.projectId, sheetName, rowNumber].join("|")
+  };
 }
 
 function savePlanBaseline() {
@@ -297,15 +310,31 @@ function buildTaskExportRows(tasks) {
     责任单位: task.owner || "",
     施工内容: task.system || "",
     节点名称: task.name || "",
+    计划开始: task.plannedStart || "",
     计划完成: task.planned || "",
-    实际完成: task.actual || "",
     计划完成率: expectedProgress(task),
     完成率: task.progress || 0,
     状态: getTaskStatus(task).label,
     滞后原因: classifyDelayReason(`${task.note || ""}${task.name || ""}`),
     监理意见: task.note || "",
-    附件数: Array.isArray(task.attachments) ? task.attachments.length : 0
+    附件数: Array.isArray(task.attachments) ? task.attachments.length : 0,
+    ...excelSourceExportFields(task)
   }));
+}
+
+function excelSourceExportFields(task) {
+  const source = task.excelSource;
+  if (!source?.values) return {};
+  const fields = {
+    Excel文件: source.fileName || "",
+    Excel工作表: source.sheetName || "",
+    Excel行号: source.rowNumber || ""
+  };
+  (source.headers || Object.keys(source.values)).forEach((header) => {
+    if (!header || header === "来源工作表") return;
+    fields[`Excel原始_${header}`] = source.values[header] ?? "";
+  });
+  return fields;
 }
 
 function buildDelayExportRows() {
@@ -318,7 +347,7 @@ function exportProjectCsv(prefix, extension, rows) {
 
 function exportCsv(fileName, rows) {
   const data = rows.length ? rows : [{ 提示: "当前筛选条件下暂无数据" }];
-  const headers = Object.keys(data[0]);
+  const headers = [...new Set(data.flatMap((row) => Object.keys(row)))];
   const csv = [
     headers.join(","),
     ...data.map((row) => headers.map((header) => csvCell(row[header])).join(","))
@@ -432,7 +461,7 @@ function createIssuesFromDelayedTasks() {
       status: "未整改",
       taskId: task.id,
       closedAt: "",
-      action: `请${task.owner || "责任单位"}针对 ${task.system || task.name} 提交赶工措施并更新实际完成情况。`,
+      action: `请${task.owner || "责任单位"}针对 ${task.system || task.name} 提交赶工措施并更新完成率。`,
       reviewNote: "",
       category: classifyDelayReason(task.note || task.name || "")
     });
@@ -501,7 +530,23 @@ function restoreImportPatch(patch) {
   Object.entries(patch.scopeAfterByProject || patch.scopeBeforeByProject || {}).forEach(([projectId, scope]) => {
     state.projectScopes[projectId] = cloneData(scope);
   });
+  restoreImportExcelRecords(patch);
   deriveTaskFieldsForList(state.tasks);
+}
+
+function restoreImportExcelRecords(patch) {
+  state.excelRecords = state.excelRecords || [];
+  const byKey = new Map(state.excelRecords.map((record) => [record.recordKey || record.id, record]));
+  [...(patch.createdExcelRecords || []), ...(patch.updatedExcelRecordsAfter || [])].forEach((record) => {
+    const key = record.recordKey || record.id;
+    if (!key) return;
+    if (byKey.has(key)) Object.assign(byKey.get(key), cloneData(record));
+    else {
+      const nextRecord = cloneData(record);
+      state.excelRecords.push(nextRecord);
+      byKey.set(key, nextRecord);
+    }
+  });
 }
 
 function renderWeightPanel() {
@@ -538,7 +583,7 @@ function renderDataHealthPanel() {
     ? `上次备份 ${new Date(state.uiPreferences.lastBackupAt).toLocaleString()}`
     : "尚未导出过完整备份";
   const backendText = backendHealth
-    ? `数据库 v${backendHealth.version || 0}｜备份 ${backendHealth.backups || 0}｜${backendHealth.ok ? "健康" : "需检查"}`
+    ? `数据库 v${backendHealth.version || 0}｜备份 ${backendHealth.backups || 0}｜最近 ${backendHealth.latestBackup?.createdAt ? new Date(backendHealth.latestBackup.createdAt).toLocaleString() : "暂无"}｜${backendHealth.ok ? "健康" : "需检查"}`
     : "数据库状态读取中";
   els.dataHealthPanel.innerHTML = `
     <strong>数据体检</strong>
@@ -572,14 +617,6 @@ function applyDataFixSuggestions() {
   createRestorePoint("自动修复数据建议");
   let fixed = 0;
   tasks.forEach((task) => {
-    if (Number(task.progress || 0) >= 100 && !task.actual) {
-      task.actual = task.planned || localDateText(today);
-      fixed += 1;
-    }
-    if (task.actual && Number(task.progress || 0) < 100) {
-      task.progress = 100;
-      fixed += 1;
-    }
     if (!task.floor && task.building && !String(task.building).includes("地下")) {
       task.floor = "1层";
       fixed += 1;
@@ -603,10 +640,9 @@ function buildDataHealthReport() {
   const missingLocation = [];
   const missingOwner = [];
   const missingSystem = [];
-  const completedWithoutActual = [];
+  const planRangeConflicts = [];
   const invalidFloorLabels = [];
   const floorOverflow = [];
-  const progressConflicts = [];
 
   tasks.forEach((task) => {
     const key = taskKey(task);
@@ -616,15 +652,14 @@ function buildDataHealthReport() {
     if (!task.building || !task.floor) missingLocation.push(task.name || task.system || "-");
     if (!String(task.owner || "").trim()) missingOwner.push(task.name || task.system || "-");
     if (!String(task.system || "").trim()) missingSystem.push(task.name || task.building || "-");
-    if (Number(task.progress || 0) >= 100 && !task.actual) completedWithoutActual.push(task.name || task.system || "-");
+    if (task.plannedStart && task.planned && new Date(task.plannedStart) > new Date(task.planned)) {
+      planRangeConflicts.push(`${task.building || "-"}｜${task.floor || "-"}｜${task.system || task.name}`);
+    }
     if (task.floor && !/^\d+层$|^地下\d+层$|^整栋$/.test(String(task.floor).trim())) invalidFloorLabels.push(`${task.building || "-"}｜${task.floor}｜${task.system || task.name}`);
     const building = scope.buildings.find((item) => String(task.building || "").includes(item.name));
     const floor = parseFloorNumber(task.floor);
     if (building && floor && floor > Number(building.floors || 1)) {
       floorOverflow.push(`${building.name}｜${task.floor}｜${task.system || task.name}`);
-    }
-    if ((task.actual || Number(task.progress || 0) >= 100) && Number(task.progress || 0) < 100) {
-      progressConflicts.push(`${task.building || "-"}｜${task.floor || "-"}｜${task.system || task.name}`);
     }
   });
 
@@ -634,10 +669,9 @@ function buildDataHealthReport() {
     { title: "缺少楼栋/楼层", items: missingLocation },
     { title: "缺少责任单位", items: missingOwner },
     { title: "缺少施工内容", items: missingSystem },
-    { title: "已完成无实际日期", items: completedWithoutActual },
+    { title: "计划时间冲突", items: planRangeConflicts },
     { title: "楼层写法不统一", items: invalidFloorLabels },
-    { title: "楼层超范围", items: floorOverflow },
-    { title: "进度状态冲突", items: progressConflicts }
+    { title: "楼层超范围", items: floorOverflow }
   ];
   const issueCount = sections.reduce((sum, section) => sum + section.items.length, 0);
   return {

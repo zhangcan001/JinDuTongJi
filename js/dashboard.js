@@ -14,9 +14,7 @@
   els.pageTitle.textContent = titles[view];
   if (state?.uiPreferences) {
     state.uiPreferences.activeView = view;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
+    saveState({ scope: "prefs" });
   }
   if (typeof renderViewContent === "function") renderViewContent(view);
 
@@ -271,9 +269,11 @@ function renderFloorHeatmap(tasks) {
 
 function renderUnitProgressChart(tasks) {
   if (!els.unitProgressChart) return;
+  const hiddenUnits = new Set(["精装单位", "机电分包", "总包一标段"]);
   const grouped = new Map();
   tasks.forEach((task) => {
     const unit = task.owner || task.discipline || "未填单位";
+    if (hiddenUnits.has(unit)) return;
     if (!grouped.has(unit)) grouped.set(unit, []);
     grouped.get(unit).push(task);
   });
@@ -508,7 +508,7 @@ function renderDeviationPanel(tasks) {
     ? deviations.map(({ task, status }) => `
         <article class="ops-item ${status.className}">
           <strong>${escapeHtml(task.building || "-")}｜${escapeHtml(task.floor || "-")}｜${escapeHtml(task.system || task.name)}</strong>
-          <small>计划 ${escapeHtml(task.planned)}｜实际 ${escapeHtml(task.actual || "未完成")}｜当前 ${Number(task.progress || 0)}%｜建议 ${expectedProgress(task)}%</small>
+          <small>开始 ${escapeHtml(task.plannedStart || "-")}｜完成 ${escapeHtml(task.planned || "-")}｜当前 ${Number(task.progress || 0)}%｜建议 ${expectedProgress(task)}%</small>
         </article>
       `).join("")
     : `<article class="ops-item"><strong>暂无明显偏差</strong><small>当前计划与实际推进基本匹配</small></article>`;
@@ -516,10 +516,11 @@ function renderDeviationPanel(tasks) {
 
 function expectedProgress(task) {
   if (task.plannedProgress !== undefined && task.plannedProgress !== "") return Number(task.plannedProgress || 0);
-  if (task.actual) return 100;
-  const delta = daysBetween(task.planned);
-  if (delta < 0) return 100;
-  if (delta <= 7) return 80;
+  const finishDelta = daysBetween(task.planned);
+  const startDelta = daysBetween(task.plannedStart);
+  if (task.planned && finishDelta < 0) return 100;
+  if (task.planned && finishDelta <= 7) return 80;
+  if (task.plannedStart && startDelta < 0) return 20;
   return 40;
 }
 
@@ -695,7 +696,8 @@ function renderAnalyticsPanel(tasks, issues) {
     { title: "楼栋进度", rows: summarizeTasks(tasks, (task) => resolveBuildingName(task.building || task.name) || "未填楼栋") },
     { title: "责任单位", rows: summarizeTasks(tasks, (task) => task.owner || "未填单位") },
     { title: "专业分部", rows: summarizeTasks(tasks, (task) => task.discipline || "未填专业") },
-    { title: "月份趋势", rows: summarizeTasks(tasks, (task) => String(task.planned || "未排期").slice(0, 7)) }
+    { title: "计划开始月份", rows: summarizeTasks(tasks, (task) => String(task.plannedStart || "未排期").slice(0, 7)) },
+    { title: "计划完成月份", rows: summarizeTasks(tasks, (task) => String(task.planned || "未排期").slice(0, 7)) }
   ];
   const openIssueCount = issues.filter((issue) => normalizeIssueStatus(issue.status) !== "已闭合").length;
   if (els.analyticsSummary) {

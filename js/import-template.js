@@ -4,12 +4,12 @@
   const usedNames = new Set();
   const sheets = [templateInstructionSheet()];
   scope.units.forEach((unit) => {
-    const headers = ["楼栋", "楼层", "专业", "施工内容", "计划完成时间", "实际完成情况", "备注"];
+    const headers = ["楼栋", "楼层", "专业", "施工内容", "计划开始时间", "计划完成时间", "实际完成情况", "备注"];
     const rows = buildUnitTemplateRows(unit, scope);
     sheets.push({
       name: uniqueSheetName(unit.name, usedNames),
       rows: [headers, ...rows],
-      widths: [12, 10, 12, 24, 16, 18, 20]
+      widths: [12, 10, 12, 24, 16, 16, 18, 20]
     });
   });
   exportTemplateWorkbook(sheets, fileName);
@@ -24,8 +24,8 @@ function templateInstructionSheet() {
       ["2. 表头不要删除或改名，导入时会按表头识别字段。", ""],
       [`3. 施工部位建议使用项目范围中的楼栋名称，如 ${templateBuildingHint()}。`, ""],
       ["4. 楼层填写如 3层、地下1层；完成率填写 0-100。", ""],
-      ["5. 完成率为 100% 时建议同步填写实际完成日期。", ""],
-      ["6. 地下室部位进度统一按完成百分比填写，不使用实际完成情况。", ""],
+      ["5. 完成率填写 0-100，已完成可填写 100% 或“已完成”。", ""],
+      ["6. 地下室部位进度统一按完成百分比填写。", ""],
       ["当前项目", currentProjectName()],
       ["导出日期", localDateText(today)]
     ],
@@ -55,6 +55,7 @@ function buildUnitTemplateRows(unit, scope) {
           unit.name.replace("单位", "") || unit.code || "专业",
           system,
           "",
+          "",
           "未开始",
           ""
         ]);
@@ -70,6 +71,7 @@ function buildUnitTemplateRows(unit, scope) {
         "地下1层",
         unit.name.replace("单位", "") || unit.code || "专业",
         system,
+        "",
         "",
         "未开始",
         ""
@@ -343,8 +345,8 @@ function exportImportErrors() {
     专业: item.normalized?.discipline || "",
     责任单位: item.normalized?.owner || "",
     施工内容: item.normalized?.system || item.normalized?.name || "",
+    计划开始: item.normalized?.plannedStart || "",
     计划完成: item.normalized?.planned || "",
-    实际完成: item.normalized?.actual || "",
     完成率: item.normalized?.progress ?? ""
   }));
   exportProjectCsv("导入错误行", "csv", rows);
@@ -360,6 +362,7 @@ function buildImportCorrectionRows(rows) {
     专业: row.专业,
     责任单位: row.责任单位,
     施工内容: row.施工内容,
+    计划开始时间: row.计划开始,
     计划完成时间: row.计划完成,
     实际完成情况: row.完成率 ? `${clampProgress(row.完成率)}%` : "未开始",
     备注: row.问题

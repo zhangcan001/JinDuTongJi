@@ -17,6 +17,9 @@ function openStateMirrorDB() {
       if (!request.result.objectStoreNames.contains("snapshots")) {
         request.result.createObjectStore("snapshots", { keyPath: "id" });
       }
+      if (!request.result.objectStoreNames.contains("pending")) {
+        request.result.createObjectStore("pending", { keyPath: "id" });
+      }
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -47,6 +50,52 @@ async function flushStateMirrorToIndexedDB() {
     tx.objectStore("snapshots").put(snapshot);
   } catch {
     indexedDbConnectionPromise = null;
+  }
+}
+
+async function putIndexedDbRecord(storeName, record) {
+  if (!window.indexedDB) return false;
+  try {
+    const db = await openStateMirrorDB();
+    if (!db) return false;
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).put(record);
+    return true;
+  } catch {
+    indexedDbConnectionPromise = null;
+    return false;
+  }
+}
+
+async function getIndexedDbRecord(storeName, id) {
+  if (!window.indexedDB) return null;
+  try {
+    const db = await openStateMirrorDB();
+    if (!db) return null;
+    return await new Promise((resolve) => {
+      const tx = db.transaction(storeName, "readonly");
+      const request = tx.objectStore(storeName).get(id);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => resolve(null);
+      tx.onerror = () => resolve(null);
+    });
+  } catch {
+    indexedDbConnectionPromise = null;
+    return null;
+  }
+}
+
+async function deleteIndexedDbRecord(storeName, id) {
+  if (!window.indexedDB) return false;
+  try {
+    const db = await openStateMirrorDB();
+    if (!db) return false;
+    const tx = db.transaction(storeName, "readwrite");
+    tx.objectStore(storeName).delete?.(id);
+    return true;
+  } catch {
+    indexedDbConnectionPromise = null;
+    return false;
   }
 }
 
@@ -110,7 +159,7 @@ function scheduleStateMirrorToBackend(options = {}) {
 
 async function flushStateMirrorToBackend() {
   if (backendSaveInFlight) return false;
-  const snapshot = pendingBackendStateSnapshot || readPendingBackendState();
+  const snapshot = pendingBackendStateSnapshot || await readPendingBackendState();
   pendingBackendStateSnapshot = null;
   clearTimeout(pendingBackendStateWriteTimer);
   pendingBackendStateWriteTimer = null;
@@ -182,20 +231,37 @@ function handleBackendStateConflict(snapshot, payload = {}) {
 }
 
 function persistPendingBackendState(snapshot) {
+  pendingBackendStateSnapshot = snapshot;
+  const persistId = ++pendingBackendStatePersistId;
+  putIndexedDbRecord("pending", {
+    id: "backend-state",
+    savedAt: new Date().toISOString(),
+    baseVersion: backendStateVersion,
+    state: snapshot
+  }).then(() => {
+    if (persistId !== pendingBackendStatePersistId) deleteIndexedDbRecord("pending", "backend-state");
+  });
   try {
     localStorage.setItem(BACKEND_PENDING_STATE_KEY, JSON.stringify({
       savedAt: new Date().toISOString(),
       baseVersion: backendStateVersion,
-      state: snapshot
+      [LOCAL_STORAGE_EXTERNAL_STATE]: true
     }));
   } catch {
-    // 本地状态本身已经保存过；队列写入失败时保持内存重试。
+    // IndexedDB and memory keep the pending snapshot when localStorage is full.
   }
 }
 
-function readPendingBackendState() {
+async function readPendingBackendState() {
+  if (pendingBackendStateSnapshot) return migrateState(cloneData(pendingBackendStateSnapshot));
+  const indexedDbRecord = await getIndexedDbRecord("pending", "backend-state");
+  if (indexedDbRecord?.state && Array.isArray(indexedDbRecord.state.projects) && Array.isArray(indexedDbRecord.state.tasks)) {
+    if (Number.isFinite(Number(indexedDbRecord.baseVersion))) backendStateVersion = Number(indexedDbRecord.baseVersion);
+    return migrateState(cloneData(indexedDbRecord.state));
+  }
   try {
     const payload = JSON.parse(localStorage.getItem(BACKEND_PENDING_STATE_KEY) || "null");
+    if (payload?.[LOCAL_STORAGE_EXTERNAL_STATE]) return null;
     if (!payload?.state || !Array.isArray(payload.state.projects) || !Array.isArray(payload.state.tasks)) return null;
     if (Number.isFinite(Number(payload.baseVersion))) backendStateVersion = Number(payload.baseVersion);
     return migrateState(cloneData(payload.state));
@@ -206,11 +272,14 @@ function readPendingBackendState() {
 }
 
 function clearPendingBackendState() {
+  pendingBackendStatePersistId += 1;
+  pendingBackendStateSnapshot = null;
+  deleteIndexedDbRecord("pending", "backend-state");
   localStorage.removeItem(BACKEND_PENDING_STATE_KEY);
 }
 
 function pendingBackendStateLabel() {
-  const snapshot = pendingBackendStateSnapshot || readPendingBackendState();
+  const snapshot = pendingBackendStateSnapshot;
   if (!snapshot) return "";
   const tasks = snapshot.tasks?.length || 0;
   return `(${tasks} 条节点)`;
@@ -234,9 +303,9 @@ function markBackendApiUnavailable() {
   updateBackendSaveStatus("idle", "本地模式");
 }
 
-function resumePendingBackendWork() {
+async function resumePendingBackendWork() {
   if (!canUseBackendState()) return;
-  const snapshot = readPendingBackendState();
+  const snapshot = await readPendingBackendState();
   if (snapshot) {
     updateBackendSaveStatus("saving", "补交中");
     pendingBackendStateSnapshot = snapshot;
@@ -276,16 +345,10 @@ async function hydrateStateFromBackend() {
     await migrateLocalStateToBackendIfNeeded();
     return false;
   }
-  const localStamp = state.uiPreferences?.lastBackendSaveAt || "";
-  if (loadedStateFromLocalStorage && localStamp && payload.updatedAt && localStamp >= payload.updatedAt) {
-    backendStateLoaded = true;
-    return false;
-  }
   state = migrateState(cloneData(payload.state));
   backendStateVersion = Number(payload.version || 0);
   backendStateLoaded = true;
-  pendingLocalStateSnapshot = JSON.stringify(state);
-  flushLocalStateWrite();
+  queueLocalStateWrite(state);
   mirrorStateToIndexedDB();
   updateBackendSaveStatus("saved", "已连接");
   return true;
@@ -326,6 +389,9 @@ async function refreshBackendHealth() {
     const response = await fetch("./api/health", { cache: "no-store" });
     if (!response.ok) return null;
     backendHealth = await response.json();
+    if (backendHealth.latestBackup?.createdAt && state?.uiPreferences) {
+      state.uiPreferences.lastBackupAt = backendHealth.latestBackup.createdAt;
+    }
     return backendHealth;
   } catch {
     backendHealth = null;
@@ -381,8 +447,15 @@ function renderSystemSettingsPanel() {
   const backups = backendBackups || [];
   const versions = (state.uiPreferences?.systemVersions || []).slice(0, 6);
   const logs = (state.uiPreferences?.systemLogs || []).slice(0, 8);
+  const latestBackup = backendHealth?.latestBackup;
+  const latestBackupText = latestBackup?.createdAt
+    ? `${new Date(latestBackup.createdAt).toLocaleString()}｜${escapeHtml(latestBackup.name || "")}`
+    : "暂无数据库备份";
   els.systemHealthPanel.innerHTML = `
     <p>${backendHealth ? `数据库：${escapeHtml(backendHealth.database || "未知")}` : "数据库：读取中"}</p>
+    <p>${backendHealth ? `备份目录：${escapeHtml(backendHealth.backupDir || "未知")}` : "备份目录：读取中"}</p>
+    <p>${backendHealth ? `最近备份：${latestBackupText}` : "最近备份：读取中"}</p>
+    <p>${backendHealth ? `日志：${escapeHtml(backendHealth.logPath || "未知")}` : "日志：读取中"}</p>
     <p>${backendHealth ? `WAL：${escapeHtml(backendHealth.wal || "未知")}｜备份 ${backendHealth.backups || 0} 份` : "WAL：读取中"}</p>
     <div class="health-grid">
       ${checks.length ? checks.slice(0, 8).map((item) => `
@@ -394,7 +467,7 @@ function renderSystemSettingsPanel() {
     </div>
   `;
   els.systemBackupPanel.innerHTML = `
-    <p>${backups.length ? `已保留 ${backups.length} 份数据库备份。` : "暂无数据库备份。"}</p>
+    <p>${backups.length ? `已保留 ${backups.length} 份数据库备份，系统每天首次启动会自动保留一份。` : "暂无数据库备份，系统会在有数据库后每天首次启动自动保留一份。"}</p>
     <div>
       ${backups.slice(0, 6).map((backup) => `
         <article>
@@ -434,7 +507,7 @@ function renderSystemSettingsPanel() {
 
 async function resolveBackendStateConflict() {
   if (!backendConflict) return showToast("没有待处理的数据库冲突");
-  const snapshot = readPendingBackendState();
+  const snapshot = await readPendingBackendState();
   const summary = snapshot ? `本地待同步：${snapshot.tasks?.length || 0} 条节点、${snapshot.issues?.length || 0} 条整改。` : "本地待同步快照未找到。";
   if (!(await confirmAction(`${summary}\n\n将载入数据库 v${backendConflict.currentVersion || "?"} 的最新状态，本地待同步快照会继续保留，可通过导出备份另存。`, {
     title: "载入数据库版本",
@@ -445,8 +518,7 @@ async function resolveBackendStateConflict() {
   state = migrateState(cloneData(payload.state));
   backendStateVersion = Number(payload.version || backendStateVersion);
   backendConflict = null;
-  pendingLocalStateSnapshot = JSON.stringify(compactStateForStorage(state));
-  flushLocalStateWrite();
+  queueLocalStateWrite(state);
   mirrorStateToIndexedDB();
   await refreshSystemState();
   render();
@@ -492,8 +564,7 @@ async function restoreBackendBackup(name) {
     if (!restored?.state) throw new Error("restored state missing");
     state = migrateState(cloneData(restored.state));
     backendStateVersion = Number(restored.version || 0);
-    pendingLocalStateSnapshot = JSON.stringify(state);
-    flushLocalStateWrite();
+    queueLocalStateWrite(state);
     mirrorStateToIndexedDB();
     recordAudit("恢复数据库备份", name);
     await fetchBackendBackups();
@@ -521,8 +592,7 @@ async function importBackendJsonBackup(event) {
     const restored = await readStateFromBackend();
     state = migrateState(cloneData(restored.state));
     backendStateVersion = Number(restored.version || 0);
-    pendingLocalStateSnapshot = JSON.stringify(state);
-    flushLocalStateWrite();
+    queueLocalStateWrite(state);
     mirrorStateToIndexedDB();
     render();
     showToast("数据库 JSON 已导入");

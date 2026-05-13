@@ -1,5 +1,7 @@
 ﻿function renderTasks() {
   const tasks = currentProjectItems("tasks");
+  const excelColumns = currentExcelTaskColumns(tasks);
+  renderTaskTableHeader(excelColumns);
   renderTaskColumnToggles();
   syncTaskFilterControls(tasks);
   renderSavedTaskViewOptions();
@@ -24,9 +26,10 @@
               <td data-col="location" data-label="部位"><button class="text-action" type="button" data-locate-task="${escapeAttr(task.id)}">${escapeHtml(task.building || "-")}</button><br><small>${escapeHtml(task.floor || "未填楼层")}｜${escapeHtml(task.system || "未挂接施工内容")}</small></td>
               <td data-col="discipline" data-label="专业">${escapeHtml(task.discipline)}</td>
               <td data-col="owner" data-label="责任单位">${escapeHtml(task.owner)}</td>
-              <td data-col="planned" data-label="计划"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="planned" value="${escapeAttr(task.planned || "")}"></td>
-              <td data-col="actual" data-label="实际"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="actual" value="${escapeAttr(task.actual || "")}"></td>
+              <td data-col="plannedStart" data-label="计划开始"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="plannedStart" value="${escapeAttr(task.plannedStart || "")}"></td>
+              <td data-col="planned" data-label="计划完成"><input class="inline-task-field compact" type="date" data-inline-task="${escapeAttr(task.id)}" data-inline-field="planned" value="${escapeAttr(task.planned || "")}"></td>
               <td data-col="progress" data-label="完成率"><input class="inline-task-field mini" type="number" min="0" max="100" step="5" data-inline-task="${escapeAttr(task.id)}" data-inline-field="progress" value="${Number(task.progress || 0)}"><small>计划 ${expectedProgress(task)}%｜偏差 ${Number(task.progress || 0) - expectedProgress(task)}%</small><div class="quick-progress"><button data-quick-progress="0" data-task-id="${escapeAttr(task.id)}">0%</button><button data-quick-progress="50" data-task-id="${escapeAttr(task.id)}">50%</button><button data-quick-progress="100" data-task-id="${escapeAttr(task.id)}">100%</button></div></td>
+              ${excelColumns.map((column) => `<td data-col="${escapeAttr(excelTaskColumnKey(column))}" data-label="${escapeAttr(column)}">${escapeHtml(excelTaskValue(task, column) || "-")}</td>`).join("")}
               <td data-col="status" data-label="状态"><span class="status ${status.className}">${status.label}</span>${task.reviewStatus === "pending" ? `<br><small>待复核</small>` : ""}</td>
               <td data-col="actions" data-label="操作">
                 <div class="row-actions">
@@ -39,11 +42,56 @@
           `;
         })
         .join("")
-    : tableEmptyRowHtml(10, "当前筛选条件下暂无节点", taskFilters.query || globalSearchQuery ? "可以调整关键词或筛选条件后再试。" : "可以新增节点或通过 Excel 批量导入。");
+    : tableEmptyRowHtml(10 + excelColumns.length, "当前筛选条件下暂无节点", taskFilters.query || globalSearchQuery ? "可以调整关键词或筛选条件后再试。" : "可以新增节点或通过 Excel 批量导入。");
 
   renderTaskPagination(filteredTasks.length, totalPages);
   updateBulkTaskToolbar();
   applyTaskColumnVisibility();
+}
+
+function renderExcelRecords() {
+  if (!els.excelRecordHead || !els.excelRecordTable) return;
+  const records = currentProjectExcelRecords();
+  if (els.excelRecordCount) els.excelRecordCount.textContent = `${records.length} 行`;
+  const columns = excelRecordColumns(records);
+  if (!records.length) {
+    setSafeHtml(els.excelRecordHead, "");
+    setSafeHtml(els.excelRecordTable, tableEmptyRowHtml(1, "暂无 Excel 原始数据", "导入表格后会在这里按 Excel 原始列展示。"));
+    return;
+  }
+  setSafeHtml(els.excelRecordHead, `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>`);
+  setSafeHtml(els.excelRecordTable, records.slice(0, 300).map((record) => `
+    <tr>
+      ${columns.map((column) => `<td data-label="${escapeAttr(column)}">${escapeHtml(excelRecordCell(record, column) || "-")}</td>`).join("")}
+    </tr>
+  `).join(""));
+}
+
+function currentProjectExcelRecords() {
+  return (state.excelRecords || [])
+    .filter((record) => record.projectId === state.selectedProjectId)
+    .sort((a, b) => String(a.sheetName || "").localeCompare(String(b.sheetName || ""), "zh-Hans-CN", { numeric: true })
+      || Number(a.rowNumber || 0) - Number(b.rowNumber || 0));
+}
+
+function excelRecordColumns(records) {
+  const base = ["工作表", "行号"];
+  const seen = new Set(base);
+  const dynamic = [];
+  records.forEach((record) => {
+    (record.rawHeaders || Object.keys(record.rawValues || {})).forEach((header) => {
+      if (!header || header === "来源工作表" || seen.has(header)) return;
+      seen.add(header);
+      dynamic.push(header);
+    });
+  });
+  return [...base, ...dynamic.slice(0, 28)];
+}
+
+function excelRecordCell(record, column) {
+  if (column === "工作表") return record.sheetName || "";
+  if (column === "行号") return record.rowNumber || "";
+  return record.rawValues?.[column] ?? "";
 }
 
 function taskAttachmentSummary(attachments, taskId) {
@@ -55,16 +103,68 @@ function taskAttachmentSummary(attachments, taskId) {
 const TASK_COLUMNS = [
   ["discipline", "专业"],
   ["owner", "责任单位"],
-  ["planned", "计划"],
-  ["actual", "实际"],
+  ["plannedStart", "计划开始"],
+  ["planned", "计划完成"],
   ["progress", "完成率"],
   ["status", "状态"]
 ];
 
+function renderTaskTableHeader(excelColumns = []) {
+  const headerRow = typeof els.taskTable?.closest === "function"
+    ? els.taskTable.closest("table")?.querySelector("thead tr")
+    : null;
+  if (!headerRow) return;
+  headerRow.querySelectorAll("[data-excel-task-col]").forEach((cell) => cell.remove());
+  const statusHeader = headerRow.querySelector('[data-col="status"]');
+  excelColumns.forEach((column) => {
+    const th = document.createElement("th");
+    th.dataset.col = excelTaskColumnKey(column);
+    th.dataset.excelTaskCol = column;
+    th.textContent = column;
+    headerRow.insertBefore(th, statusHeader || headerRow.lastElementChild);
+  });
+}
+
+function currentExcelTaskColumns(tasks) {
+  const counts = new Map();
+  (tasks || []).forEach((task) => {
+    (task.excelSource?.headers || []).forEach((header) => {
+      if (!shouldShowExcelTaskColumn(header)) return;
+      const value = excelTaskValue(task, header);
+      if (!String(value || "").trim()) return;
+      counts.set(header, (counts.get(header) || 0) + 1);
+    });
+  });
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hans-CN", { numeric: true }))
+    .slice(0, 8)
+    .map(([header]) => header);
+}
+
+function shouldShowExcelTaskColumn(header) {
+  const text = String(header || "").trim();
+  if (!text || text.startsWith("__") || text === "来源工作表") return false;
+  return !["项目", "项目名称", "工程名称", "施工部位", "部位", "楼栋", "楼号", "楼层", "层数", "专业", "施工单位", "责任单位", "单位", "施工内容", "系统", "节点名称", "节点", "计划开始", "计划开始时间", "计划完成", "计划完成时间", "完成率", "进度", "实际完成情况", "完成情况", "备注", "监理意见"].includes(text);
+}
+
+function excelTaskColumnKey(header) {
+  let hash = 0;
+  String(header || "").split("").forEach((char) => {
+    hash = ((hash << 5) - hash) + char.charCodeAt(0);
+    hash |= 0;
+  });
+  return `excel-${Math.abs(hash)}`;
+}
+
+function excelTaskValue(task, header) {
+  return task.excelSource?.values?.[header] ?? "";
+}
+
 function renderTaskColumnToggles() {
   if (!els.taskColumnToggles) return;
   const hidden = new Set(state.uiPreferences?.hiddenTaskColumns || []);
-  els.taskColumnToggles.innerHTML = TASK_COLUMNS.map(([key, label]) => `
+  const excelColumns = currentExcelTaskColumns(currentProjectItems("tasks")).map((header) => [excelTaskColumnKey(header), `Excel:${header}`]);
+  els.taskColumnToggles.innerHTML = [...TASK_COLUMNS, ...excelColumns].map(([key, label]) => `
     <label><input type="checkbox" value="${escapeAttr(key)}" ${hidden.has(key) ? "" : "checked"}> ${escapeHtml(label)}</label>
   `).join("");
 }
@@ -72,7 +172,8 @@ function renderTaskColumnToggles() {
 function handleTaskColumnToggle() {
   state.uiPreferences = state.uiPreferences || {};
   const visible = new Set([...els.taskColumnToggles.querySelectorAll("input:checked")].map((input) => input.value));
-  state.uiPreferences.hiddenTaskColumns = TASK_COLUMNS.map(([key]) => key).filter((key) => !visible.has(key));
+  const columns = [...TASK_COLUMNS.map(([key]) => key), ...currentExcelTaskColumns(currentProjectItems("tasks")).map(excelTaskColumnKey)];
+  state.uiPreferences.hiddenTaskColumns = columns.filter((key) => !visible.has(key));
   persistUiPreferences();
   applyTaskColumnVisibility();
 }
@@ -121,7 +222,6 @@ function updateInlineTaskField(taskId, field, value) {
   createRestorePoint("快速编辑台账");
   const before = task[field];
   task[field] = nextValue;
-  if (field === "progress" && Number(nextValue) >= 100 && !task.actual) task.actual = localDateText(today);
   recordAudit("快速编辑台账", `${task.name}: ${field}`);
   recordEntityHistory("task", task.id, task.name, [`${field}: ${before || "空"} -> ${nextValue || "空"}`], "台账快速编辑");
   commitStateChange("tasks");
@@ -180,9 +280,8 @@ function quickUpdateTaskProgress(taskId, progress) {
   createRestorePoint("快速更新进度");
   const before = Number(task.progress || 0);
   task.progress = progress;
-  task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
   recordAudit("快速更新节点", `${task.name}: ${progress}%`);
-  recordEntityHistory("task", task.id, task.name, [`完成率: ${before}% -> ${progress}%`, progress >= 100 ? `实际完成: ${task.actual}` : ""].filter(Boolean), "快速更新进度");
+  recordEntityHistory("task", task.id, task.name, [`完成率: ${before}% -> ${progress}%`], "快速更新进度");
   commitStateChange("tasks");
   showToast("节点进度已更新");
 }
@@ -227,7 +326,6 @@ async function bulkSetTaskProgress(progress) {
   tasks.forEach((task) => {
     const before = Number(task.progress || 0);
     task.progress = progress;
-    task.actual = progress >= 100 ? (task.actual || localDateText(today)) : "";
     recordEntityHistory("task", task.id, task.name, [`完成率: ${before}% -> ${progress}%`], "批量更新进度");
   });
   recordAudit("批量更新节点", `${tasks.length} 项设为 ${progress}%`);
@@ -336,8 +434,8 @@ function editTask(taskId) {
     floor: task.floor || "",
     system: task.system || "",
     owner: task.owner || "",
+    plannedStart: task.plannedStart || "",
     planned: task.planned || "",
-    actual: task.actual || "",
     progress: Number(task.progress || 0),
     note: task.note || ""
   }).forEach(([name, value]) => {
@@ -387,8 +485,8 @@ async function saveTaskFromForm(event) {
     floor: data.floor,
     system: data.system,
     owner: data.owner,
+    plannedStart: data.plannedStart,
     planned: data.planned,
-    actual: data.actual,
     progress: Number(data.progress || 0),
     note: data.note
   };
@@ -411,14 +509,16 @@ async function saveTaskFromForm(event) {
   recordEntityHistory("task", taskId, payload.name, existing ? [
     `节点: ${before.name || "空"} -> ${payload.name || "空"}`,
     `责任单位: ${before.owner || "空"} -> ${payload.owner || "空"}`,
-    `计划: ${before.planned || "空"} -> ${payload.planned || "空"}`,
+    `计划开始: ${before.plannedStart || "空"} -> ${payload.plannedStart || "空"}`,
+    `计划完成: ${before.planned || "空"} -> ${payload.planned || "空"}`,
     `完成率: ${Number(before.progress || 0)}% -> ${Number(payload.progress || 0)}%`,
     `监理意见: ${before.note || "空"} -> ${payload.note || "空"}`,
     `附件: ${(before.attachments || []).length} -> ${payload.attachments.length}`
   ] : [
     `节点: ${payload.name || "空"}`,
     `责任单位: ${payload.owner || "空"}`,
-    `计划: ${payload.planned || "空"}`,
+    `计划开始: ${payload.plannedStart || "空"}`,
+    `计划完成: ${payload.planned || "空"}`,
     `完成率: ${Number(payload.progress || 0)}%`,
     `附件: ${payload.attachments.length}`
   ], existing ? "编辑节点" : "新增节点");

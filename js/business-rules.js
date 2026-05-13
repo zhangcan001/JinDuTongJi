@@ -38,10 +38,15 @@
   }
 
   function getTaskStatus(task, baseDate = new Date()) {
-    if (task.actual || Number(task.progress) >= 100) return { label: TASK_STATUS.DONE, className: "done" };
-    const delta = daysBetween(task.planned, baseDate);
-    if (delta < 0) return { label: TASK_STATUS.DELAY, className: "delay" };
-    if (delta <= 7) return { label: TASK_STATUS.RISK, className: "risk" };
+    const progress = Number(task.progress || 0);
+    if (progress >= 100) return { label: TASK_STATUS.DONE, className: "done" };
+    const startDelta = daysBetween(task.plannedStart, baseDate);
+    const finishDelta = daysBetween(task.planned, baseDate);
+    if (task.plannedStart && startDelta < 0 && progress <= 0) return { label: TASK_STATUS.DELAY, className: "delay" };
+    if (task.planned && finishDelta < 0) return { label: TASK_STATUS.DELAY, className: "delay" };
+    if ((task.plannedStart && startDelta <= 7 && progress <= 0) || (task.planned && finishDelta <= 7)) {
+      return { label: TASK_STATUS.RISK, className: "risk" };
+    }
     return { label: TASK_STATUS.NORMAL, className: "normal" };
   }
 

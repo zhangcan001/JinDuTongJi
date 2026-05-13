@@ -37,13 +37,14 @@
           <details class="top-more-actions">
             <summary>更多</summary>
             <div class="top-more-panel">
+              <p class="local-mode-note">纯本地使用：默认以监理工程师身份录入，数据保存在本机数据库和本地备份中。</p>
               <label class="top-field">
-                角色
+                使用身份
                 <select id="roleSelect" aria-label="选择当前角色">
+                  <option value="supervisor">监理工程师</option>
                   <option value="admin">管理员</option>
                   <option value="pm">项目经理</option>
                   <option value="contractor">施工单位</option>
-                  <option value="supervisor">监理</option>
                   <option value="viewer">只读查看</option>
                 </select>
               </label>
@@ -532,7 +533,7 @@
                   更新内容
                   <select id="importUpdatePolicySelect">
                     <option value="all">更新全部字段</option>
-                    <option value="progressOnly">仅完成率和实际日期</option>
+                    <option value="progressOnly">仅完成率</option>
                     <option value="planOnly">仅计划日期</option>
                     <option value="skipBlank">空值不覆盖</option>
                   </select>
@@ -581,7 +582,7 @@
                 <button class="ghost-btn" id="applyDataFixBtn" type="button">自动修复建议</button>
                 <button class="ghost-btn" id="approveImportsBtn" type="button">确认待复核</button>
               </div>
-              <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划完成、实际完成、完成率、监理意见。选择文件后会先生成预览，点击“确认导入并同步”后才写入全局进度。</p>
+              <p id="importResult">字段建议：项目、施工部位、楼层、专业、责任单位、施工内容、节点名称、计划开始、计划完成、完成率、监理意见。选择文件后会先生成预览，点击“确认导入并同步”后才写入全局进度。</p>
             </div>
             <div class="validation-report" id="importValidationReport"></div>
             <div class="import-diff" id="importDiffPanel"></div>
@@ -650,12 +651,12 @@
                 <input name="owner" required placeholder="如：总包一标段" />
               </label>
               <label>
-                计划完成
-                <input name="planned" type="date" required />
+                计划开始
+                <input name="plannedStart" type="date" />
               </label>
               <label>
-                实际完成
-                <input name="actual" type="date" />
+                计划完成
+                <input name="planned" type="date" required />
               </label>
               <label>
                 完成率
@@ -683,6 +684,16 @@
             <div class="panel-heading">
               <h2>进度明细台账</h2>
               <span id="taskCount">0 项</span>
+            </div>
+            <div class="panel-heading excel-record-heading">
+              <h2>Excel 原始数据</h2>
+              <span id="excelRecordCount">0 行</span>
+            </div>
+            <div class="table-wrap excel-record-table-wrap">
+              <table>
+                <thead id="excelRecordHead"></thead>
+                <tbody id="excelRecordTable"></tbody>
+              </table>
             </div>
             <div class="task-filter-bar">
               <label>
@@ -762,8 +773,8 @@
                     <th data-col="location">部位/楼层/内容</th>
                     <th data-col="discipline">专业</th>
                     <th data-col="owner">责任单位</th>
-                    <th data-col="planned">计划</th>
-                    <th data-col="actual">实际</th>
+                    <th data-col="plannedStart">计划开始</th>
+                    <th data-col="planned">计划完成</th>
                     <th data-col="progress">完成率</th>
                     <th data-col="status">状态</th>
                     <th data-col="actions"></th>

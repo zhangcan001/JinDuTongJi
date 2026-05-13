@@ -406,7 +406,7 @@ function buildUnitProgressRows(tasks) {
       delayed: false
     };
     current.progressValues.push(Number(task.progress || 0));
-    current.done = current.done || Boolean(task.actual) || Number(task.progress) >= 100;
+    current.done = current.done || Number(task.progress) >= 100;
     current.delayed = current.delayed || getTaskStatus(task).className === "delay";
     grouped.set(key, current);
   });

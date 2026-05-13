@@ -407,6 +407,7 @@ function currentActiveView() {
 
 function renderViewContent(view = currentActiveView()) {
   if (view === "schedule") {
+    renderExcelRecords();
     renderTasks();
     renderIssues();
     return;
@@ -748,26 +749,19 @@ document.addEventListener("visibilitychange", () => {
 restoreUiPreferences();
 bindEvents();
 setDefaultDates();
-initializeLocalOnlyFeatures();
-render();
-if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
-resumePendingBackendWork();
-hydrateStateFromBackend().then((restoredFromBackend) => {
-  if (restoredFromBackend) {
-    restoreUiPreferences();
-    render();
-    if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
-    showToast("已从本地数据库恢复数据");
-    return true;
-  }
-  return hydrateStateFromIndexedDB();
-}).then((restored) => {
-  if (!restored) return;
+bootstrapState();
+
+async function bootstrapState() {
+  await resumePendingBackendWork();
+  const restoredFromBackend = await hydrateStateFromBackend();
+  const restoredFromCache = restoredFromBackend ? false : await hydrateStateFromIndexedDB();
+  initializeLocalOnlyFeatures();
   restoreUiPreferences();
   render();
   if (state.uiPreferences?.activeView) switchView(state.uiPreferences.activeView);
-  showToast("已从 IndexedDB 恢复本地数据");
-});
+  if (restoredFromBackend) showToast("已从本地数据库恢复数据");
+  else if (restoredFromCache) showToast("已从 IndexedDB 恢复本地数据");
+}
 
 function initializeLocalOnlyFeatures() {
   createDailyRestorePointIfNeeded();

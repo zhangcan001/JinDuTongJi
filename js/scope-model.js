@@ -745,18 +745,18 @@ function getBuildingStats(scope, tasks) {
         progress,
         tasks: floorTasks,
         status: aggregateFloorStatus(floorTasks, progress),
-        openCount: floorTasks.filter((task) => Number(task.progress || 0) < 100 && !task.actual).length,
+        openCount: floorTasks.filter((task) => Number(task.progress || 0) < 100).length,
         delayCount: floorTasks.filter((task) => getTaskStatus(task).className === "delay").length
       };
     });
     const floorProgress = floorDetails.map((floor) => floor.progress);
     const progress = related.length ? averageProgress(related) : 0;
     const completed = related
-      .filter((task) => Number(task.progress || 0) >= 100 || task.actual)
+      .filter((task) => Number(task.progress || 0) >= 100)
       .map(taskDetailText)
       .slice(0, 10);
     const active = related
-      .filter((task) => Number(task.progress || 0) < 100 && !task.actual)
+      .filter((task) => Number(task.progress || 0) < 100)
       .sort((a, b) => Number(b.progress || 0) - Number(a.progress || 0))
       .map(taskDetailText)
       .slice(0, 8);
@@ -793,11 +793,11 @@ function renderScopedModelDetail(target) {
       ? floorProgressValue(target, selectedModelFloor)
       : target.progress;
   const completedItems = scopedTasks
-    .filter((task) => Number(task.progress || 0) >= 100 || task.actual)
+    .filter((task) => Number(task.progress || 0) >= 100)
     .map(taskDetailText)
     .slice(0, 10);
   const activeItems = scopedTasks
-    .filter((task) => Number(task.progress || 0) < 100 && !task.actual)
+    .filter((task) => Number(task.progress || 0) < 100)
     .sort((a, b) => Number(b.progress || 0) - Number(a.progress || 0))
     .map(taskDetailText)
     .slice(0, 10);
@@ -805,7 +805,7 @@ function renderScopedModelDetail(target) {
   const emptyScope = selectedModelFloor ? "该楼层" : "该楼栋";
   const completedHtml = completedItems.length
     ? completedItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
-    : `<li>${emptyScope}暂无 100% 完成项，导入实际完成或完成率后会自动更新。</li>`;
+    : `<li>${emptyScope}暂无 100% 完成项，更新完成率后会自动归类。</li>`;
   const activeHtml = activeItems.length
     ? activeItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
     : `<li>${emptyScope}暂无施工中节点。</li>`;
@@ -823,8 +823,8 @@ function renderScopedModelDetail(target) {
               <td>${escapeHtml(task.owner || task.discipline || "-")}</td>
               <td>${escapeHtml(task.system || task.name || "-")}</td>
               <td><span class="status ${status.className}">${status.label}</span><br><small>${Number(task.progress || 0)}%</small></td>
+              <td>${escapeHtml(task.plannedStart || "-")}</td>
               <td>${escapeHtml(task.planned || "-")}</td>
-              <td>${escapeHtml(task.actual || "-")}</td>
               <td>
                 ${escapeHtml(task.note || "-")}
                 <br><button class="text-action" type="button" data-edit-task="${escapeAttr(task.id)}">编辑节点</button>
@@ -846,8 +846,8 @@ function renderScopedModelDetail(target) {
             <th>单位</th>
             <th>施工内容</th>
             <th>进度</th>
-            <th>计划</th>
-            <th>实际</th>
+            <th>计划开始</th>
+            <th>计划完成</th>
             <th>监理意见</th>
           </tr>
         </thead>

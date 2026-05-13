@@ -17,6 +17,7 @@ const LOG_PATH = path.join(LOG_DIR, "server.log");
 const BACKUP_KEEP_COUNT = 30;
 const VERSION_KEEP_COUNT = 80;
 const BACKEND_AUDIT_KEEP_COUNT = 2000;
+const DAILY_BACKUP_PREFIX = "jindu-daily-";
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const WRITE_ROLES = new Set(["admin", "pm", "supervisor"]);
 
@@ -32,6 +33,7 @@ fs.mkdirSync(BACKUP_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 createStartupBackup();
+createDailyBackupIfNeeded();
 
 const db = new DatabaseSync(DB_PATH);
 db.exec(`
@@ -84,6 +86,7 @@ db.exec(`
     floor TEXT,
     system TEXT,
     progress REAL,
+    planned_start TEXT,
     planned TEXT,
     actual TEXT,
     review_status TEXT,
@@ -124,6 +127,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_backend_audit_logs_created_at ON backend_audit_logs(created_at);
 `);
 ensureAppStateVersionColumn();
+ensureTasksPlannedStartColumn();
 recordMigration(1, "initial backend schema");
 recordMigration(2, "state indexes and optimistic versioning");
 recordMigration(3, "backup restore export health and logs");
@@ -156,8 +160,8 @@ const insertScope = db.prepare(`
   ON CONFLICT(project_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
 `);
 const insertTask = db.prepare(`
-  INSERT INTO tasks (id, project_id, name, owner, discipline, building, floor, system, progress, planned, actual, review_status, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO tasks (id, project_id, name, owner, discipline, building, floor, system, progress, planned_start, planned, actual, review_status, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     project_id = excluded.project_id,
     name = excluded.name,
@@ -167,6 +171,7 @@ const insertTask = db.prepare(`
     floor = excluded.floor,
     system = excluded.system,
     progress = excluded.progress,
+    planned_start = excluded.planned_start,
     planned = excluded.planned,
     actual = excluded.actual,
     review_status = excluded.review_status,
@@ -291,6 +296,10 @@ async function handleApi(request, response) {
       updatedAt: row?.updated_at || null,
       version: row?.version || 0,
       backups: listBackups().length,
+      latestBackup: latestBackupInfo(),
+      backupDir: BACKUP_DIR,
+      logPath: LOG_PATH,
+      appRoot: ROOT,
       checks: health.checks,
       problems: health.problems,
       wal: getPragmaValue("journal_mode"),
@@ -506,6 +515,7 @@ function rebuildIndexes(state, updatedAt) {
       task.floor || "",
       task.system || "",
       Number(task.progress || 0),
+      task.plannedStart || "",
       task.planned || "",
       task.actual || "",
       task.reviewStatus || "",
@@ -562,6 +572,11 @@ function ensureAppStateVersionColumn() {
   if (!columns.includes("version")) db.exec("ALTER TABLE app_state ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
 }
 
+function ensureTasksPlannedStartColumn() {
+  const columns = db.prepare("PRAGMA table_info(tasks)").all().map((item) => item.name);
+  if (!columns.includes("planned_start")) db.exec("ALTER TABLE tasks ADD COLUMN planned_start TEXT");
+}
+
 function recordMigration(version, name) {
   db.prepare("INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)").run(version, name, new Date().toISOString());
 }
@@ -580,6 +595,19 @@ function createStartupBackup() {
   fs.copyFileSync(DB_PATH, path.join(BACKUP_DIR, `jindu-startup-${dateStamp()}.sqlite`));
   pruneBackups();
   logEvent("backup.startup", "created startup backup");
+}
+
+function createDailyBackupIfNeeded() {
+  if (!fs.existsSync(DB_PATH) || fs.statSync(DB_PATH).size === 0) return null;
+  const day = localDateStamp();
+  const existing = listBackups().find((backup) => backup.name.startsWith(`${DAILY_BACKUP_PREFIX}${day}`));
+  if (existing) return existing;
+  const target = path.join(BACKUP_DIR, `${DAILY_BACKUP_PREFIX}${day}.sqlite`);
+  checkpointDatabase();
+  fs.copyFileSync(DB_PATH, target);
+  pruneBackups();
+  logEvent("backup.daily", path.basename(target));
+  return { name: path.basename(target), path: target, time: fs.statSync(target).mtimeMs };
 }
 
 function listBackups() {
@@ -620,6 +648,11 @@ function backupInfo(item) {
     size: fs.statSync(item.path).size,
     createdAt: new Date(item.time).toISOString()
   };
+}
+
+function latestBackupInfo() {
+  const latest = listBackups()[0];
+  return latest ? backupInfo(latest) : null;
 }
 
 function restoreSqliteBackup(name) {
@@ -726,6 +759,14 @@ function dateStamp() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
 }
 
+function localDateStamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
 function resolveStaticPath(url) {
   const parsed = new URL(url, `http://${HOST}:${PORT}`);
   const pathname = decodeURIComponent(parsed.pathname);
@@ -784,7 +825,7 @@ server.listen(PORT, HOST, () => {
 
 setInterval(() => {
   try {
-    createManualBackup();
+    createDailyBackupIfNeeded();
     const health = checkDatabaseHealth();
     logBackendAudit("scheduled.health", `ok=${health.ok}`);
   } catch (error) {

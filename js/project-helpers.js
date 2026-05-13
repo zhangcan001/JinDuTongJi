@@ -1,11 +1,106 @@
 function normalizeDate(value) {
   if (!value) return "";
-  const text = String(value).trim();
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return localDateText(value);
+  const text = String(value)
+    .trim()
+    .replace(/^[']+/, "")
+    .replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/\s+/g, " ")
+    .replace(/[，,].*$/, "")
+    .replace(/星期[一二三四五六日天]|周[一二三四五六日天]/g, "")
+    .replace(/[（(]\s*[周星期]?[一二三四五六日天]\s*[）)]/g, "")
+    .replace(/(前|之前|以前|以前完成|完成|截止|止|前完成)$/g, "")
+    .trim();
+  if (!text) return "";
+
+  const serial = Number(text);
+  if (/^\d+(\.\d+)?$/.test(text) && serial > 25569 && serial < 60000) {
+    const excelDate = new Date(Math.round((serial - 25569) * 86400 * 1000));
+    return localDateText(excelDate);
+  }
+
+  const compact = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) return validDateText(compact[1], compact[2], compact[3]);
+
+  const full = text.match(/(\d{4})\s*[年./\-\\\s]\s*(\d{1,2})\s*(?:月|[./\-\\\s])\s*(\d{1,2})/);
+  if (full) return validDateText(full[1], full[2], full[3]);
+
+  const yearLast = text.match(/^(\d{1,2})[./\-\\](\d{1,2})[./\-\\](\d{2,4})(?:\s|$)/);
+  if (yearLast) {
+    const year = normalizeDateYear(yearLast[3]);
+    const first = Number(yearLast[1]);
+    const second = Number(yearLast[2]);
+    if (first > 12 && second <= 12) return validDateText(year, second, first);
+    return validDateText(year, first, second);
+  }
+
+  const yearFirstShort = text.match(/^(\d{2})[./\-\\](\d{1,2})[./\-\\](\d{1,2})(?:\s|$)/);
+  if (yearFirstShort) return validDateText(normalizeDateYear(yearFirstShort[1]), yearFirstShort[2], yearFirstShort[3]);
+
+  const chinese = text.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)?/);
+  if (chinese) return validDateText(String(today.getFullYear()), chinese[1], chinese[2]);
+
+  const chineseText = normalizeChineseDateText(text);
+  if (chineseText) return chineseText;
+
+  const short = text.match(/^(\d{1,2})[./\-](\d{1,2})(?:\s|$)/);
+  if (short) return validDateText(String(today.getFullYear()), short[1], short[2]);
+
   const date = new Date(text);
   if (!Number.isNaN(date.getTime())) return localDateText(date);
-  const match = text.match(/(\d{4})[年/-](\d{1,2})[月/-](\d{1,2})/);
-  if (!match) return "";
-  return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+  return "";
+}
+
+function normalizeDateYear(value) {
+  const year = Number(value);
+  if (String(value).length === 2) return String(year >= 50 ? 1900 + year : 2000 + year);
+  return String(year);
+}
+
+function validDateText(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return "";
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return "";
+  const date = new Date(y, m - 1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return "";
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function normalizeChineseDateText(value) {
+  const text = String(value || "").replace(/\s+/g, "");
+  const yearFull = text.match(/([零〇一二三四五六七八九]{4})年([正一二三四五六七八九十冬腊]{1,3})月([初一二三四五六七八九十廿卅]{1,3})(?:日|号)?/);
+  if (yearFull) return validDateText(chineseYearToNumber(yearFull[1]), chineseMonthToNumber(yearFull[2]), chineseDayToNumber(yearFull[3]));
+  const short = text.match(/([正一二三四五六七八九十冬腊]{1,3})月([初一二三四五六七八九十廿卅]{1,3})(?:日|号)?/);
+  if (short) return validDateText(String(today.getFullYear()), chineseMonthToNumber(short[1]), chineseDayToNumber(short[2]));
+  return "";
+}
+
+function chineseYearToNumber(value) {
+  const digits = { 零: 0, "〇": 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  return String(value || "").split("").map((char) => digits[char]).join("");
+}
+
+function chineseMonthToNumber(value) {
+  if (value === "正") return 1;
+  if (value === "冬") return 11;
+  if (value === "腊") return 12;
+  return chineseDayToNumber(value);
+}
+
+function chineseDayToNumber(value) {
+  const text = String(value || "").replace(/^初/, "");
+  const digits = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (digits[text]) return digits[text];
+  if (text === "十") return 10;
+  if (text.startsWith("十")) return 10 + Number(digits[text.slice(1)] || 0);
+  if (text.startsWith("廿")) return 20 + Number(digits[text.slice(1)] || 0);
+  if (text.startsWith("卅")) return 30 + Number(digits[text.slice(1)] || 0);
+  if (text.endsWith("十")) return Number(digits[text[0]] || 0) * 10;
+  const match = text.match(/^([一二三四五六七八九])十([一二三四五六七八九])$/);
+  if (match) return Number(digits[match[1]] || 0) * 10 + Number(digits[match[2]] || 0);
+  return Number(text);
 }
 
 function clampProgress(value) {
@@ -126,8 +221,8 @@ function deriveTaskFields(task) {
     task.system,
     task.discipline,
     task.owner,
-    task.planned,
-    task.actual
+    task.plannedStart,
+    task.planned
   ].join(" ").toLowerCase();
   return task;
 }
@@ -273,6 +368,24 @@ function unitCode(name) {
 }
 
 function findExistingTaskForImport(importedTask) {
+  if (importedTask?.excelRecordKey) {
+    const matchedByRecord = state.tasks.find((task) => task.excelRecordKey === importedTask.excelRecordKey);
+    if (matchedByRecord) return matchedByRecord;
+  }
+  const importedExcelKey = excelSourceTaskKey(importedTask);
+  if (importedExcelKey) {
+    const matchedByExcel = state.tasks.find((task) => excelSourceTaskKey(task) === importedExcelKey);
+    if (matchedByExcel) return matchedByExcel;
+  }
   const importedKey = taskKey(importedTask);
   return state.tasks.find((task) => taskKey(task) === importedKey);
+}
+
+function excelSourceTaskKey(task) {
+  if (task?.excelRecordKey) return task.excelRecordKey;
+  const source = task?.excelSource;
+  const rowNumber = Number(source?.rowNumber || 0);
+  const sheetName = String(source?.sheetName || "").trim();
+  if (!task?.projectId || !sheetName || !rowNumber) return "";
+  return [task.projectId, sheetName, rowNumber].join("|");
 }

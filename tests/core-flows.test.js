@@ -15,7 +15,9 @@ function createBrowserContext() {
     crypto: { randomUUID: () => `test-id-${Math.random().toString(16).slice(2)}` },
     performance: { now: () => Date.now() },
     document: { querySelector: () => null, querySelectorAll: () => [] },
+    els: { toast: null },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    location: { protocol: "file:" },
     indexedDB: null,
     stateCache: { version: 0, projectItems: new Map() },
     taskFilters: {},
@@ -24,7 +26,8 @@ function createBrowserContext() {
       context.stateCache.projectItems = new Map();
     },
     notifyUser() {},
-    showToast() {}
+    showToast() {},
+    commitStateChange() {}
   };
   context.window = context;
   context.globalThis = context;
@@ -71,6 +74,9 @@ vm.runInContext(`
     previewImportedRows,
     applyImportedRows,
     stageImportedRowsForReview,
+    approvePendingImports,
+    buildImportVersionPatch,
+    restoreImportPatch,
     readWorkbookRows,
     inferImportFieldMap,
     buildImportHeaderMap,
@@ -85,6 +91,7 @@ vm.runInContext(`
     normalizedOwnerKey,
     taskMatchesScopeUnit,
     averageProgress,
+    buildTaskExportRows,
     runCanvasModelLoop: globalThis.runCanvasModelLoop,
     drawCanvasBuildingModel: globalThis.drawCanvasBuildingModel
   };
@@ -100,6 +107,7 @@ const normalized = api.normalizeImportRow({
   专业: "机电",
   施工单位: "机电单位",
   施工内容: "室内给水系统",
+  计划开始时间: "2026/05/01",
   计划完成时间: "2026/05/12",
   实际完成情况: "施工中",
   备注: "深化图纸待复核"
@@ -109,8 +117,14 @@ assert.equal(normalized.projectName, "城东综合体一期");
 assert.equal(normalized.building, "A1（6层）");
 assert.equal(normalized.floor, "2层");
 assert.equal(normalized.progress, 50);
+assert.equal(normalized.plannedStart, "2026-05-01");
 assert.equal(normalized.planned, "2026-05-12");
 assert.equal(normalized.note, "深化图纸待复核");
+
+assert.equal(api.normalizeImportRow({ 计划完成时间: "'2026年5月12日（周二）" }).planned, "2026-05-12");
+assert.equal(api.normalizeImportRow({ 计划完成时间: "２０２６.５.１２前完成" }).planned, "2026-05-12");
+assert.equal(api.normalizeImportRow({ 计划完成时间: "5/12/26 00:00" }).planned, "2026-05-12");
+assert.equal(api.normalizeImportRow({ 计划完成时间: "二〇二六年五月十二日" }).planned, "2026-05-12");
 assert.equal(api.isImportFileTooLarge({ size: 8 * 1024 * 1024 + 1 }), true);
 assert.equal(api.isImportFileTooLarge({ size: 1024 }), false);
 assert.equal(api.escapeAttr('p"1`<x>'), "p&quot;1&#096;&lt;x&gt;");
@@ -255,18 +269,65 @@ const importRows = [{
   施工单位: "机电单位",
   施工内容: "UI导入测试系统",
   计划完成时间: "2026-05-23",
-  实际完成情况: "未开始"
+  实际完成情况: "未开始",
+  现场批次: "A-01",
+  材料状态: "已进场"
 }];
 const beforeImportCount = context.state.tasks.length;
 assert.equal(api.applyImportedRows(importRows, "updateOnly").skipped, 1);
 assert.equal(context.state.tasks.length, beforeImportCount);
 assert.equal(api.applyImportedRows(importRows, "appendOnly").created, 1);
+const excelBackedTask = context.state.tasks.find((task) => task.system === "UI导入测试系统");
+assert.equal(excelBackedTask.excelSource.values.现场批次, "A-01");
+assert.equal(excelBackedTask.excelSource.values.材料状态, "已进场");
+assert.equal(excelBackedTask.excelRecordKey, undefined);
+const excelRecord = context.state.excelRecords.find((record) => record.rawValues?.施工内容 === "UI导入测试系统");
+assert.equal(excelRecord.rawValues.现场批次, "A-01");
+assert.equal(excelRecord.mappedFields.system, "UI导入测试系统");
+const exportedExcelRow = api.buildTaskExportRows([excelBackedTask])[0];
+assert.equal(exportedExcelRow.Excel原始_现场批次, "A-01");
 assert.equal(api.applyImportedRows(importRows, "appendOnly").skipped, 1);
-assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1");
+const renamedSystemFirst = {
+  来源工作表: "机电单位",
+  __importRowNumber: 88,
+  项目: "城东综合体一期",
+  楼栋: "A1",
+  楼层: "2层",
+  专业: "机电",
+  施工单位: "机电单位",
+  施工内容: "导管内穿线",
+  计划完成时间: "2026-05-24",
+  实际完成情况: "施工中"
+};
+assert.equal(api.applyImportedRows([renamedSystemFirst], "appendOnly").created, 1);
+const renamedBeforeCount = context.state.tasks.length;
+assert.equal(api.applyImportedRows([{ ...renamedSystemFirst, 施工内容: "消防导管内穿线", 实际完成情况: "已完成" }], "upsert").updated, 1);
+assert.equal(context.state.tasks.length, renamedBeforeCount);
+const renamedTask = context.state.tasks.find((task) => task.excelSource?.rowNumber === 88 && task.excelSource?.sheetName === "机电单位");
+assert.equal(renamedTask.system, "消防导管内穿线");
+assert.equal(renamedTask.progress, 100);
+assert.equal(renamedTask.source, "excel-record");
+assert.equal(renamedTask.excelRecordKey, "p1|机电单位|88");
+const renamedRecord = context.state.excelRecords.find((record) => record.sheetName === "机电单位" && record.rowNumber === 88);
+assert.equal(renamedRecord.rawValues.施工内容, "消防导管内穿线");
+assert.equal(renamedRecord.mappedFields.system, "消防导管内穿线");
+assert.equal(api.applyImportedRows([{ ...renamedSystemFirst, 施工内容: "appendOnly不应改写" }], "appendOnly").skipped, 1);
+assert.equal(context.state.excelRecords.find((record) => record.sheetName === "机电单位" && record.rowNumber === 88).rawValues.施工内容, "消防导管内穿线");
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:2");
 const staged = api.stageImportedRowsForReview([{ ...importRows[0], 施工内容: "UI待复核系统" }], "review.csv");
 assert.equal(staged.created, 1);
 assert.ok(context.state.pendingImports.some((item) => item.fileName === "review.csv"));
-assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1");
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:2");
+const reviewExcelRow = { ...renamedSystemFirst, __importRowNumber: 89, 施工内容: "待复核消防导管", 实际完成情况: "施工中" };
+const reviewResult = api.stageImportedRowsForReview([reviewExcelRow], "review-source.xlsx");
+assert.equal(reviewResult.created, 1);
+assert.equal(reviewResult.createdExcelRecords[0].rawValues.施工内容, "待复核消防导管");
+const reviewPending = context.state.pendingImports.find((item) => item.excelRecord?.rowNumber === 89);
+assert.equal(reviewPending.excelRecord.rawValues.施工内容, "待复核消防导管");
+api.approvePendingImports();
+assert.equal(context.state.pendingImports.some((item) => item.excelRecord?.rowNumber === 89), false);
+assert.equal(context.state.excelRecords.find((record) => record.sheetName === "机电单位" && record.rowNumber === 89).rawValues.施工内容, "待复核消防导管");
+assert.equal(context.state.tasks.find((task) => task.excelRecordKey === "p1|机电单位|89").system, "待复核消防导管");
 const floorSyncResult = api.applyImportedRows([{
   ...importRows[0],
   楼栋: "A2",
@@ -285,7 +346,7 @@ assert.equal(newBuildingSyncResult.created, 1);
 const c1ScopeBuilding = context.state.projectScopes.p1.buildings.find((building) => building.name === "C1");
 assert.equal(c1ScopeBuilding.name, "C1");
 assert.equal(c1ScopeBuilding.floors, 12);
-assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:1,A2:9,C1:12");
+assert.equal(context.state.projectScopes.p1.buildings.map((building) => `${building.name}:${building.floors}`).join(","), "A1:2,A2:9,C1:12");
 const elevatorImportResult = api.applyImportedRows([{
   ...importRows[0],
   施工单位: "电梯单位",
@@ -405,7 +466,7 @@ const migrated = api.migrateState({
   ]
 });
 
-assert.equal(migrated.currentRole, "admin");
+assert.equal(migrated.currentRole, "supervisor");
 assert.equal(migrated.uiPreferences.activeView, "dashboard");
 assert.equal(migrated.tasks.find((task) => task.id === "t-1").reviewStatus, "approved");
 assert.equal(migrated.tasks.some((task) => task.id === "t-elevator"), false);
@@ -470,10 +531,18 @@ async function runAsyncChecks() {
   const indexedDbMock = createIndexedDbMock();
   context.indexedDB = indexedDbMock;
   context.window.indexedDB = indexedDbMock;
-  context.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const localItems = new Map();
+  context.localStorage = {
+    getItem: (key) => localItems.get(key) || null,
+    setItem: (key, value) => localItems.set(key, String(value)),
+    removeItem: (key) => localItems.delete(key)
+  };
   context.window.localStorage = context.localStorage;
   context.state = { projects: [], tasks: [{ id: "first" }], issues: [], selectedProjectId: "p1", uiPreferences: {} };
-  api.saveState();
+  api.saveState({ immediate: true });
+  const localStateMarker = JSON.parse(localItems.get("supervision-progress-app-v1"));
+  assert.equal(localStateMarker.__jinduExternalState, true);
+  assert.equal(localStateMarker.tasks, undefined);
   context.state.tasks = [{ id: "second" }];
   api.saveState();
   await api.flushStateMirrorToIndexedDB();

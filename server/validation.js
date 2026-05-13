@@ -27,10 +27,12 @@ function validateState(state) {
 function validateTaskRecord(task) {
   const progress = Number(task.progress ?? 0);
   if (!Number.isFinite(progress) || progress < 0 || progress > 100) return { ok: false, error: `节点 ${task.id} 完成率必须在 0-100 之间` };
-  for (const field of ["planned", "actual"]) {
+  for (const field of ["plannedStart", "planned"]) {
     if (task[field] && !isDateText(task[field])) return { ok: false, error: `节点 ${task.id} 的${field}日期格式不正确` };
   }
-  if (task.actual && task.planned && progress < 100) return { ok: false, error: `节点 ${task.id} 已填实际日期但完成率未达 100%` };
+  if (task.plannedStart && task.planned && new Date(task.plannedStart) > new Date(task.planned)) {
+    return { ok: false, error: `节点 ${task.id} 的计划开始日期不能晚于计划完成日期` };
+  }
   return { ok: true };
 }
 

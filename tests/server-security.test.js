@@ -96,6 +96,9 @@ async function waitForServer(port) {
 
     const health = await request(port, "GET", "/api/health");
     assert.equal(health.status, 200);
+    assert.ok(health.json.database.endsWith("jindu.sqlite"));
+    assert.ok(health.json.backupDir.endsWith("backups"));
+    assert.ok(health.json.logPath.endsWith("server.log"));
 
     const viewerWrite = await request(port, "PUT", "/api/state", { state: { projects: [], tasks: [], issues: [] }, baseVersion: 0 }, {
       "X-Jindu-Actor": "viewer"

@@ -23,6 +23,14 @@ assert.deepEqual(rules.getTaskStatus({ planned: "2026-05-20", progress: 100 }, b
   label: "已完成",
   className: "done"
 });
+assert.deepEqual(rules.getTaskStatus({ plannedStart: "2026-05-09", planned: "2026-05-20", progress: 0 }, base), {
+  label: "已滞后",
+  className: "delay"
+});
+assert.deepEqual(rules.getTaskStatus({ plannedStart: "2026-05-09", planned: "2026-05-20", progress: 10 }, base), {
+  label: "正常",
+  className: "normal"
+});
 
 assert.equal(rules.normalizeIssueStatus("跟踪中"), "整改中");
 assert.equal(rules.normalizeIssueStatus("未知"), "未整改");

@@ -26,11 +26,11 @@
     if (status && completionStatusToProgress(status) == null) {
       problems.push("实际完成情况只能为：未开始、已完成或 0-100 完成百分比");
     }
+    if (normalized.plannedStart && !isDateField(normalized.plannedStart)) problems.push("计划开始时间格式不正确");
     if (normalized.planned && !isDateField(normalized.planned)) problems.push("计划完成时间格式不正确");
-    if (normalized.actual && !isDateField(normalized.actual)) problems.push("实际完成时间格式不正确");
+    if (normalized.plannedStart && normalized.planned && new Date(normalized.plannedStart) > new Date(normalized.planned)) problems.push("计划开始时间不能晚于计划完成时间");
     const normalizedProgress = Number(String(normalized.progress || 0).replace("%", ""));
     if (!Number.isFinite(normalizedProgress) || normalizedProgress < 0 || normalizedProgress > 100) problems.push("完成率必须在 0-100 之间");
-    if (normalized.actual && normalizedProgress < 100) problems.push("已填实际完成时间时完成率应为 100%");
 
     const buildingMatched = normalized.building.includes("地下")
       || knownBuildings.some((building) => normalized.building.includes(building));
@@ -78,16 +78,17 @@ function previewImportedRows(rows) {
       building: normalized.building,
       floor: normalized.floor,
       system: normalized.system,
-      owner: normalized.owner || normalized.discipline || "未填责任单位"
+      owner: normalized.owner || normalized.discipline || "未填责任单位",
+      excelSource: importExcelSourceFromRow(row, "")
     };
-    const key = taskKey(importedTask);
+    const key = excelSourceTaskKey(importedTask) || taskKey(importedTask);
     if (seenKeys.has(key)) {
       preview.duplicateItems.push({ key, label: `${projectName}｜${normalized.building}｜${normalized.floor}｜${normalized.system || normalized.name}` });
       return;
     }
     seenKeys.add(key);
 
-    const existing = existingTaskIndex.get(key);
+    const existing = existingTaskIndex.get(key) || existingTaskIndex.get(taskKey(importedTask));
     const detail = importPreviewDetail(normalized, projectName, existing);
     if (existing) {
       preview.updated += 1;
@@ -114,7 +115,11 @@ function previewImportedRows(rows) {
 
 function buildTaskImportIndex() {
   const index = new Map();
-  state.tasks.forEach((task) => index.set(taskKey(task), task));
+  state.tasks.forEach((task) => {
+    const excelKey = excelSourceTaskKey(task);
+    if (excelKey) index.set(excelKey, task);
+    index.set(taskKey(task), task);
+  });
   return index;
 }
 
@@ -148,13 +153,13 @@ function collectScopeSuggestions(preview, seen, scope, normalized) {
 
 function importPreviewDetail(normalized, projectName, existing) {
   const progress = clampProgress(normalized.progress);
+  const plannedStart = normalized.plannedStart || "";
   const planned = normalized.planned || localDateText(today);
-  const actual = normalized.actual || "";
   const changes = [];
   if (existing) {
     [
-      ["计划", existing.planned || "", planned],
-      ["实际", existing.actual || "", actual],
+      ["计划开始", existing.plannedStart || "", plannedStart],
+      ["计划完成", existing.planned || "", planned],
       ["完成率", `${Number(existing.progress || 0)}%`, `${progress}%`],
       ["意见", existing.note || "", normalized.note || ""]
     ].forEach(([label, before, after]) => {
@@ -162,16 +167,14 @@ function importPreviewDetail(normalized, projectName, existing) {
     });
   }
   const warnings = [];
-  if (progress >= 100 && !actual) warnings.push("完成率 100% 但未填实际完成日期");
-  if (actual && planned && new Date(actual) < new Date(planned)) warnings.push("实际完成早于计划，按提前完成处理");
   return {
     projectName,
     location: `${normalized.building || "-"}｜${normalized.floor || "-"}`,
     name: normalized.system || normalized.name || "-",
     owner: normalized.owner || normalized.discipline || "未填责任单位",
     progress,
+    plannedStart,
     planned,
-    actual,
     changes,
     warnings
   };
@@ -229,6 +232,9 @@ function buildImportVersionPatch(result) {
     createdTasks: result.createdTasks || [],
     updatedBefore: result.updatedBefore || [],
     updatedAfter: result.updatedAfter || [],
+    createdExcelRecords: result.createdExcelRecords || [],
+    updatedExcelRecordsBefore: result.updatedExcelRecordsBefore || [],
+    updatedExcelRecordsAfter: result.updatedExcelRecordsAfter || [],
     scopeBeforeByProject: result.scopeBeforeByProject || {},
     scopeAfterByProject: result.scopeAfterByProject || {}
   };
@@ -392,14 +398,14 @@ function renderImportPreviewDetails(preview, validation) {
       <h3>可编辑预览（${editableRowsAll.length} 行）</h3>
       <div class="import-edit-table">
         <table>
-          <thead><tr><th>导入</th><th>项目</th><th>楼栋</th><th>楼层</th><th>单位</th><th>施工内容</th><th>计划</th><th>实际</th><th>完成率</th></tr></thead>
+          <thead><tr><th>导入</th><th>项目</th><th>楼栋</th><th>楼层</th><th>单位</th><th>施工内容</th><th>计划开始</th><th>计划完成</th><th>完成率</th></tr></thead>
           <tbody>
             ${editableRows.map((row) => {
               const item = importRowNormalized(row);
               const id = row.__importRowId;
               return `<tr data-preview-row="${escapeAttr(id)}">
                 <td><input type="checkbox" data-preview-include="${escapeAttr(id)}" ${pendingImport.excludedRowIds?.has(id) ? "" : "checked"}></td>
-                ${["projectName", "building", "floor", "owner", "system", "planned", "actual", "progress"].map((field) => `
+                ${["projectName", "building", "floor", "owner", "system", "plannedStart", "planned", "progress"].map((field) => `
                   <td><input data-preview-field="${escapeAttr(field)}" data-row-id="${escapeAttr(id)}" value="${escapeAttr(item[field] ?? "")}"></td>
                 `).join("")}
               </tr>`;
@@ -419,7 +425,7 @@ function renderImportPreviewDetails(preview, validation) {
       ${pageItems.length ? pageItems.map((item) => `
         <article>
           <strong>${escapeHtml(item.projectName || "")}｜${escapeHtml(item.location || "")}｜${escapeHtml(item.name || item.label || "")}</strong>
-          <small>${escapeHtml(item.owner || "")}｜计划 ${escapeHtml(item.planned || "-")}｜实际 ${escapeHtml(item.actual || "-")}｜完成率 ${item.progress === "-" ? "-" : `${item.progress ?? "-"}%`}</small>
+          <small>${escapeHtml(item.owner || "")}｜开始 ${escapeHtml(item.plannedStart || "-")}｜完成 ${escapeHtml(item.planned || "-")}｜完成率 ${item.progress === "-" ? "-" : `${item.progress ?? "-"}%`}</small>
           ${item.changes?.length ? `<p>${item.changes.map(escapeHtml).join("；")}</p>` : ""}
           ${item.warnings?.length ? `<p class="danger">${item.warnings.map(escapeHtml).join("；")}</p>` : ""}
         </article>
@@ -433,8 +439,8 @@ function renderImportPreviewDetails(preview, validation) {
     location: item.normalized?.building || "-",
     name: item.problems.join("、"),
     progress: "-",
-    planned: "-",
-    actual: "-"
+    plannedStart: "-",
+    planned: "-"
   }));
   return `
     ${editableHtml}

@@ -334,6 +334,17 @@ h2 {
   font-weight: 800;
 }
 
+.local-mode-note {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(72, 211, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(72, 211, 255, 0.08);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .top-field select,
 .top-field input {
   min-height: 38px;
@@ -3476,6 +3487,12 @@ body.office-mode .top-more-panel {
 
 body.office-mode .top-field {
   font-size: 10px;
+}
+
+body.office-mode .local-mode-note {
+  border-color: rgba(14, 165, 233, 0.18);
+  background: #f0f9ff;
+  color: #0f172a;
 }
 
 body.office-mode .top-field select,
